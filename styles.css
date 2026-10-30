@@ -41,6 +41,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 120px; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: Arial, Helvetica, sans-serif; line-height: 1.65; }
 ::selection { color: var(--selection-text); background: var(--selection-bg); }
 a { color: inherit; text-decoration: none; }
+a[href] { cursor: pointer; }
 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
 
 .wrap { width: min(1200px, calc(100% - 40px)); margin-inline: auto; }
@@ -114,7 +115,8 @@ h3 { font-size: 19px; letter-spacing: -.5px; line-height: 1.3; margin-bottom: 12
 .credentials-list p { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
 .credential-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; color: var(--muted); font: 12px/1.5 var(--mono); }
 .credential-meta > span { color: var(--accent); }
-.credentials-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; margin-top: 14px; color: var(--accent); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+.credentials-link, .credential-view { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; margin-top: 14px; color: var(--accent); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+.credential-view { margin-top: 6px; }
 /* Builder Lab: one workbench, four independent local illustrations. */
 .creative-feature { margin-block: 55px; padding: clamp(16px, 4vw, 32px); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .creative-feature .eyebrow { margin-bottom: 14px; }
@@ -328,7 +330,7 @@ h1 { font-size: clamp(38px, 6.2vw, 78px); }
 .footer-bottom { gap: 16px; }.footer-bottom > a:last-child { align-self: flex-end; }
 /* Decorative layers must never intercept a link, card, or button. */
 ::before, ::after, [aria-hidden="true"], .project-art,
-.scroll-progress, .site-glow, .cursor-dot, .cursor-ring { pointer-events: none; }
+.scroll-progress, .site-glow { pointer-events: none; }
 html { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 ::-webkit-scrollbar { width: 12px; }
 ::-webkit-scrollbar-track { background: var(--scroll-track); }
@@ -363,19 +365,13 @@ html { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
   .project-card.tilt-tracking:not(.reveal-pending):not(.reveal-visible) { transform: perspective(900px) translateY(var(--card-lift, 0px)) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)); transition: none; will-change: transform; }
 }
-/* Native cursors and basic feedback are the default, including when JS is off. */
-.cursor-dot, .cursor-ring, .site-glow { display: none; }
+/* Ambient glow never replaces the native cursor. */
+.site-glow { display: none; }
 body { position: relative; isolation: isolate; }
 /* Fixed glow sits above the body background and below all normal content. */
 .site-glow { position: fixed; inset: 0; z-index: -1; opacity: 0; background: radial-gradient(500px circle at var(--mx, 50%) var(--my, 50%), var(--ambient-glow), var(--clear)); }
-.cursor-dot, .cursor-ring { position: fixed; left: 0; top: 0; border-radius: 50%; opacity: 0; }
-.cursor-dot { width: 8px; height: 8px; background: var(--accent); z-index: 2147483647; }
-/* Translation stays on the wrapper; the outline scales independently in 150ms. */
-.cursor-ring { width: 26px; height: 26px; z-index: 0; transition: opacity .15s ease-out; }
-.cursor-ring::before { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--accent); border-radius: 50%; background: var(--clear); transform: scale(1); transition: transform .15s ease-out; }
-/* Keep the ring beneath actual page content, including during its fade-out. */
+/* Keep page content above the ambient glow. */
 main, .site-footer { position: relative; z-index: 1; }
-.cursor-dot.is-on-primary { background: var(--on-accent); }
 /* Padded link boxes never change layout when highlighted. */
 :is(.nav-links a, .contact-links a, .footer-bottom a, .project-link) { position: relative; isolation: isolate; padding: 10px 12px; border-radius: 10px; text-decoration: none; border-bottom: 0; }
 .project-link { margin-top: auto; align-self: flex-start; }
@@ -388,15 +384,7 @@ main, .site-footer { position: relative; z-index: 1; }
   .nav-links a[aria-current="location"]:hover { background: var(--active-tint); }
 }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  /* These effects exist only after mouse input; keyboard/touch keeps a native cursor. */
-  .cursor-dot, .cursor-ring, .site-glow { display: block; }
-  html.custom-cursor, html.custom-cursor * { cursor: none !important; }
-  html.custom-cursor :is(input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, [contenteditable]:not([contenteditable="false"])), html.custom-cursor [contenteditable]:not([contenteditable="false"]) * { cursor: text !important; }
-  .custom-cursor:not(.cursor-over-text) :is(.cursor-dot, .cursor-ring) { opacity: 1; }
-  .custom-cursor:not(.cursor-over-text) .cursor-ring.is-over-copy { opacity: .6; }
-  .custom-cursor:not(.cursor-over-text) .cursor-ring.is-hovering { opacity: 0; }
-  .cursor-ring.is-pressed::before { transform: scale(.85); }
-  .cursor-ring.is-hovering::before { transform: scale(.6); }
+  .site-glow { display: block; }
   .site-glow { transition: opacity .18s ease-out; }
   .site-glow.is-active { opacity: 1; }
   /* Animate the box itself, not the text; no reflow or animated shadows. */

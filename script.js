@@ -1047,79 +1047,41 @@
         return element;
       };
       const glow = makeLayer('site-glow');
-      const dot = makeLayer('cursor-dot');
-      const ring = makeLayer('cursor-ring');
-      const interactive = 'a, button, .skill-card, .project-card, [role="button"]';
-      const editable = 'input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, [contenteditable]:not([contenteditable="false"])';
-      let frame = 0, x = 0, y = 0, ringX = 0, ringY = 0;
-      let visible = false, hovering = false, refreshHit = false;
+      let frame = 0, x = 0, y = 0;
+      let visible = false;
       let glowX = null, glowY = null;
       const cards = [...document.querySelectorAll('.project-card, .skill-card')];
       const resets = [];
       const resizes = [];
-      function hit(target) {
-        const element = target instanceof Element ? target : null;
-        hovering = Boolean(element?.closest(interactive));
-        root.classList.toggle('cursor-over-text', Boolean(element?.closest(editable)));
-        ring.classList.toggle('is-hovering', hovering);
-        ring.classList.toggle('is-over-copy', Boolean(element?.closest('p, h1, h2, h3, li, label, .eyebrow, .hero-footnote')));
-        dot.classList.toggle('is-on-primary', Boolean(element?.closest('.button-primary')));
-      }
       function paint() {
         frame = 0;
         if (!visible) return;
-        // Hit-testing is done before any writes, only when scrolling changes the target.
-        if (refreshHit) { hit(document.elementFromPoint(x, y)); refreshHit = false; }
-        ringX += (x - ringX) * 0.35;
-        ringY += (y - ringY) * 0.35;
-        const settled = Math.abs(x - ringX) + Math.abs(y - ringY) < 0.01;
-        if (settled) { ringX = x; ringY = y; }
-        dot.style.transform = `translate3d(${x - 4}px, ${y - 4}px, 0) scale(${hovering ? 0.75 : 1})`;
-        ring.style.transform = `translate3d(${ringX - 13}px, ${ringY - 13}px, 0)`;
-        // The requested full-viewport gradient is updated at most once per frame.
+        // Ambient lighting updates once per frame without replacing the cursor.
         if (x !== glowX || y !== glowY) {
           glow.style.setProperty('--mx', `${x}px`);
           glow.style.setProperty('--my', `${y}px`);
           glowX = x; glowY = y;
         }
-        if (!settled) frame = requestAnimationFrame(paint);
       }
       function schedule() { if (!frame) frame = requestAnimationFrame(paint); }
       function hide() {
         visible = false;
-        ring.classList.remove('is-pressed', 'is-hovering', 'is-over-copy');
         cancelAnimationFrame(frame); frame = 0;
-        root.classList.remove('custom-cursor', 'cursor-over-text');
         glow.classList.remove('is-active');
         resets.forEach(reset => reset());
       }
       listen(document, 'pointermove', event => {
         if (event.pointerType !== 'mouse') { hide(); return; }
         x = event.clientX; y = event.clientY;
-        if (!visible) {
-          ringX = x; ringY = y;
-          // Set both positions before hiding the system cursor on first entry.
-          dot.style.transform = `translate3d(${x - 4}px, ${y - 4}px, 0) scale(${hovering ? 0.75 : 1})`;
-          ring.style.transform = `translate3d(${x - 13}px, ${y - 13}px, 0)`;
-        }
-        visible = true; hit(event.target);
-        root.classList.add('custom-cursor'); glow.classList.add('is-active');
+        visible = true;
+        glow.classList.add('is-active');
         schedule();
       });
-      listen(document, 'pointerover', event => {
-        if (event.pointerType === 'mouse' && visible) { hit(event.target); schedule(); }
-      });
-      listen(document, 'pointerdown', event => {
-        if (event.pointerType !== 'mouse') { hide(); return; }
-        ring.classList.add('is-pressed'); schedule();
-      });
-      listen(window, 'pointerup', () => { ring.classList.remove('is-pressed'); schedule(); });
       listen(document, 'pointerout', event => { if (!event.relatedTarget) hide(); });
       listen(document.documentElement, 'pointerleave', hide);
       listen(window, 'pointercancel', hide);
       listen(window, 'blur', hide);
       listen(document, 'visibilitychange', () => { if (document.hidden) hide(); });
-      listen(window, 'scroll', () => { if (visible) { refreshHit = true; schedule(); } });
 
       // Every card receives a spotlight; project cards retain their smoothed tilt.
       cards.forEach(card => {
@@ -1177,14 +1139,11 @@
         resets.push(reset);
         resizes.push(() => { if (inside) measure(); else box = null; });
       });
-      listen(window, 'resize', () => { resizes.forEach(resize => resize()); if (visible) { refreshHit = true; schedule(); } });
+      listen(window, 'resize', () => { resizes.forEach(resize => resize()); if (visible) schedule(); });
       dispose = () => {
         events.abort(); hide();
-        [dot, ring, glow].forEach(element => element.remove());
+        glow.remove();
       };
-      // Restore the native cursor if an unrelated script error interrupts the page.
-      listen(window, 'error', () => { if (dispose) { dispose(); dispose = null; } });
-      listen(window, 'unhandledrejection', () => { if (dispose) { dispose(); dispose = null; } });
     }
     watch(pointer, enable);
     watch(motion, enable);
