@@ -1,50 +1,45 @@
 /* Independent progressive enhancements: optional markup never stops later features. */
 (() => {
-  // Learning status belongs to Isfak; saved quest progress belongs to the visitor.
-  const QUEST_LEVELS = [
-    {
-      id: 'programming-foundations', title: 'Programming Foundations',
-      learningStatus: 'In progress',
-      blurb: 'Java and Python are helping me build my foundations in programming, problem solving and writing understandable code.',
-      tags: ['Java', 'Python', 'Problem solving'], projectUrl: null
+  // The demos are local illustrations; project content lives here for easy editing.
+  const LAB_PROJECTS = {
+    kapru: {
+      title: 'Kapru',
+      scenario: 'A friend’s birthday is coming up. Explore how a shopping conversation could help you find a gift.',
+      action: 'Send sample request',
+      note: 'My prototype explores multilingual shopping with Gemini and MCP.',
+      repository: 'https://github.com/MIM-Isfak/kapru-project',
+      resultTitle: 'Gift ideas revealed.',
+      result: 'A conversation turns a broad request into sample categories to explore.'
     },
-    {
-      id: 'software-development', title: 'Software Development',
-      learningStatus: 'Project experience',
-      blurb: 'Through projects such as TimeAlert and DarkScan, I am learning how APIs, databases, testing and security fit together in working applications.',
-      tags: ['APIs', 'Databases', 'Testing'],
-      projectName: 'TimeAlert',
-      projectUrl: 'https://github.com/MIM-Isfak/timealert_app'
+    classroom: {
+      title: 'Smart Classroom',
+      scenario: 'Only two students have arrived. See how a fuller classroom could change a simulated AC response.',
+      action: 'Let more students enter',
+      note: 'University team project. My role: Product Owner, covering requirements, system architecture and the final demonstration.',
+      repository: 'https://github.com/MIM-Isfak/Smart_Classroom_Edge_AI_System',
+      resultTitle: 'Classroom response updated.',
+      result: 'Higher simulated occupancy changed the simulated AC response.'
     },
-    {
-      id: 'python-data', title: 'Python & Data',
-      learningStatus: 'In progress',
-      blurb: 'I am strengthening my Python scripting and data-handling skills as a foundation for automation and machine-learning workflows.',
-      tags: ['Python', 'Data', 'Automation'], projectUrl: null
+    timealert: {
+      title: 'TimeAlert',
+      scenario: 'Tomorrow’s Database Systems class has moved. See how a timetable update could keep students informed.',
+      action: 'Apply sample update',
+      note: 'My timetable app is in development, with batch workflows, acknowledgements and Web Push integration.',
+      repository: 'https://github.com/MIM-Isfak/timealert_app',
+      resultTitle: 'Timetable updated.',
+      result: 'The new time and room are visible together with an update notice.'
     },
-    {
-      id: 'machine-learning', title: 'Machine Learning',
-      learningStatus: 'In progress',
-      blurb: 'I am learning how data, training, evaluation and inference connect. As Product Owner for our Smart Classroom Edge AI team project, I contributed to requirements, system architecture and the final demonstration.',
-      tags: ['ML fundamentals', 'Evaluation', 'Inference'],
-      projectName: 'Smart Classroom Edge AI System', isTeamProject: true,
-      projectUrl: 'https://github.com/MIM-Isfak/Smart_Classroom_Edge_AI_System'
-    },
-    {
-      id: 'devops-foundations', title: 'DevOps Foundations',
-      learningStatus: 'In progress',
-      blurb: 'I am learning Linux, Docker and CI/CD to understand how software is packaged, tested and delivered reliably.',
-      tags: ['Linux', 'Docker', 'CI/CD'], projectUrl: null
-    },
-    {
-      id: 'cloud-deployment', title: 'Cloud & Deployment — Boss Level',
-      learningStatus: 'In progress',
-      blurb: 'You are exploring it now: this portfolio is hosted on AWS Amplify Hosting. Deploying it is one practical step towards my goal of becoming an MLOps or DevOps Engineer.',
-      tags: ['AWS Amplify', 'Deployment', 'Reliability'], projectUrl: null
+    darkscan: {
+      title: 'DarkScan',
+      scenario: 'You are about to share a snippet. See how a pattern check could flag something to review first.',
+      action: 'Reveal sample finding',
+      note: 'Pattern checks can flag risky content; a clean scan is not a security guarantee.',
+      repository: 'https://github.com/MIM-Isfak/DarkScan_app',
+      resultTitle: 'Sample warning revealed.',
+      result: 'The example line needs review; a warning is not proof of an exploitable issue.'
     }
-  ];
-  const QUEST_STORAGE_KEY = 'isfak-portfolio:learning-quest:v2';
-  const QUEST_PREVIOUS_STORAGE_KEY = 'isfak-portfolio:learning-quest:v1';
+  };
+  const LAB_ORDER = ['kapru', 'classroom', 'timealert', 'darkscan'];
 
   const root = document.documentElement;
   const media = (query) => window.matchMedia ? window.matchMedia(query) : { matches: false };
@@ -146,168 +141,548 @@
     update();
   }
 
-  function setupQuest() {
-    const quest = document.getElementById('creative-feature');
-    if (!quest) return;
-    const ui = Object.fromEntries(Object.entries({
-      start: 'quest-start', board: 'quest-board', path: 'quest-path',
-      progress: 'quest-progress', meter: 'quest-meter',
-      number: 'quest-detail-number', title: 'quest-detail-title',
-      learningStatus: 'quest-learning-status', blurb: 'quest-blurb', tags: 'quest-tags',
-      project: 'quest-project', projectLabel: 'quest-project-label', advance: 'quest-continue',
-      complete: 'quest-complete', completeTitle: 'quest-complete-title', reset: 'quest-reset',
-      announcement: 'quest-announcement'
-    }).map(([name, id]) => [name, quest.querySelector(`#${id}`)]));
+  function setupBuilderLab() {
+    const lab = document.getElementById('creative-feature');
+    if (!lab) return;
+    const get = id => lab.querySelector(`#lab-${id}`);
+    const ui = {
+      startOptions: get('start-options'), start: get('start'), silent: get('silent'),
+      audio: get('audio'), sound: get('sound'), voice: get('voice'),
+      successParticles: get('success-particles'),
+      soundStatus: get('sound-status'), voiceStatus: get('voice-status'),
+      progress: get('progress'), meter: get('meter'), details: get('details'),
+      title: get('detail-title'), scenario: get('scenario'), visual: get('visual'),
+      action: get('demo-action'), demoState: get('demo-state'), replay: get('replay'),
+      response: get('response'), feedback: get('feedback'), successTitle: get('success-title'),
+      successCopy: get('success-copy'), nextHint: get('next-hint'),
+      note: get('note'), repository: get('repository'), complete: get('complete'),
+      storyTitle: get('story-title'), storyMessage: get('story-message'), particles: get('particles'), reset: get('reset'),
+      announcement: get('announcement')
+    };
     if (Object.values(ui).some(element => !element)) return;
-
-    const total = QUEST_LEVELS.length;
-    let progress = { reached: 0, finished: false };
-    // Only a highest reached level and a finish flag are stored. Selection is transient.
-    try {
-      if (localStorage.getItem(QUEST_PREVIOUS_STORAGE_KEY) !== null) {
-        localStorage.removeItem(QUEST_PREVIOUS_STORAGE_KEY);
-      }
-      const raw = localStorage.getItem(QUEST_STORAGE_KEY);
-      if (raw !== null) {
-        const saved = JSON.parse(raw);
-        if (!saved || Array.isArray(saved) || !Number.isInteger(saved.reached) ||
-            saved.reached < 0 || saved.reached > total || typeof saved.finished !== 'boolean' ||
-            (saved.finished && saved.reached !== total)) throw new Error('Invalid quest progress');
-        progress = { reached: saved.reached, finished: saved.finished };
-      }
-    } catch (_) {
-      try { localStorage.removeItem(QUEST_STORAGE_KEY); } catch (_) {}
+    const buttons = [...lab.querySelectorAll('[data-project]')];
+    const state = {
+      started: false, selectedProject: 'kapru', exploredIds: new Set(),
+      demoPhase: 'before', soundEnabled: false, voiceEnabled: false, celebrationShown: false,
+      storySelected: false
+    };
+    let audioContext = null, masterGain = null, audioGeneration = 0, speechGeneration = 0, demoGeneration = 0;
+    // One pending narration belongs to the current audio sequence; never a speech queue.
+    const audioOwner = { narrationTimer: null, cueEndsAt: 0 };
+    let preferredVoice = null, restoreActionFocus = false, finalSequenceActive = false;
+    const timers = new Set(), oscillators = new Map();
+    const synthesis = window.speechSynthesis;
+    const canSpeak = Boolean(synthesis && window.SpeechSynthesisUtterance);
+    const active = () => {
+      const rect = lab.getBoundingClientRect();
+      return state.started && !document.hidden && rect.bottom > 0 && rect.top < innerHeight;
+    };
+    const nextProject = () => LAB_ORDER.find(id => !state.exploredIds.has(id));
+    const nextHint = () => {
+      const next = nextProject();
+      return next ? `Choose Next to explore ${LAB_PROJECTS[next].title}.` :
+        'All four projects explored. Choose See my builder story.';
+    };
+    const resultExplanation = () => {
+      const project = LAB_PROJECTS[state.selectedProject];
+      return `${project.resultTitle} ${project.result} ${nextHint()}`;
+    };
+    function announce(message) { ui.announcement.textContent = message; }
+    const closingExplanation = () => `${ui.storyTitle.textContent} ${ui.storyMessage.textContent}`;
+    function syncAudio() {
+      ui.sound.textContent = `Sound: ${state.soundEnabled ? 'on' : 'off'}`;
+      ui.sound.setAttribute('aria-pressed', String(state.soundEnabled));
+      ui.voice.textContent = `Voice: ${state.voiceEnabled ? 'on' : 'off'}`;
+      ui.voice.setAttribute('aria-pressed', String(state.voiceEnabled));
     }
-    let started = false;
-    let selected = Math.max(0, progress.reached - 1);
-    const progressText = () => `${progress.reached} / ${total} levels explored`;
-    function saveProgress() {
-      try { localStorage.setItem(QUEST_STORAGE_KEY, JSON.stringify(progress)); } catch (_) {}
+    function idleVoiceStatus() {
+      ui.voiceStatus.textContent = state.voiceEnabled ? 'Voice on.' : 'Voice off.';
     }
-
-    const nodes = QUEST_LEVELS.map((level, index) => {
-      const item = document.createElement('li');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'quest-node';
-      button.id = `quest-level-${level.id}`;
-      button.setAttribute('aria-controls', 'quest-details');
-      const number = document.createElement('span');
-      number.className = 'quest-node-number';
-      number.textContent = index + 1;
-      number.setAttribute('aria-hidden', 'true');
-      const copy = document.createElement('span');
-      const title = document.createElement('span');
-      title.className = 'quest-node-title';
-      title.textContent = level.title;
-      const state = document.createElement('span');
-      state.className = 'quest-node-state';
-      copy.append(title, state);
-      button.append(number, copy);
-      item.append(button);
-      ui.path.append(item);
-      button.addEventListener('click', () => {
-        if (!started) return;
-        if (index >= progress.reached) {
-          ui.announcement.textContent = 'Complete the previous level to unlock.';
-          return;
+    function cancelSpeech() {
+      speechGeneration += 1;
+      clearTimeout(audioOwner.narrationTimer);
+      audioOwner.narrationTimer = null;
+      if (canSpeak) synthesis.cancel();
+      idleVoiceStatus();
+    }
+    function stopEffects(suspend = false) {
+      const generation = ++audioGeneration;
+      audioOwner.cueEndsAt = 0;
+      const running = audioContext?.state === 'running';
+      const now = audioContext?.currentTime || 0;
+      const suspendWhenQuiet = () => {
+        if (suspend && generation === audioGeneration && !oscillators.size && audioContext?.state === 'running') {
+          audioContext.suspend().catch(() => {});
         }
-        selected = index;
-        render();
-        ui.title.focus();
+      };
+      oscillators.forEach(({ gain, peak }, oscillator) => {
+        const release = () => {
+          oscillators.delete(oscillator);
+          oscillator.disconnect();
+          gain.disconnect();
+          suspendWhenQuiet();
+        };
+        oscillator.onended = release;
+        if (running) {
+          // A 12ms release also softens cancellation mid-note; no cleanup timer.
+          if (gain.gain.cancelAndHoldAtTime) gain.gain.cancelAndHoldAtTime(now);
+          else {
+            gain.gain.cancelScheduledValues(now);
+            // Never boost a quiet/releasing layer to AudioParam's default value.
+            gain.gain.setValueAtTime(Math.min(peak, Math.max(0, gain.gain.value)), now);
+          }
+          gain.gain.linearRampToValueAtTime(0, now + 0.012);
+          oscillator.stop(now + 0.012);
+        } else {
+          try { oscillator.stop(); } catch (_) {}
+          release();
+        }
       });
-      return { button, state };
-    });
-
-    function render() {
-      ui.board.hidden = !started;
-      ui.start.textContent = progress.reached ? 'Resume quest' : 'Start quest';
-      ui.progress.textContent = progressText();
-      ui.meter.max = total;
-      ui.meter.value = progress.reached;
-      ui.meter.textContent = `${progress.reached} / ${total}`;
-      nodes.forEach(({ button, state }, index) => {
-        const locked = index >= Math.max(1, progress.reached);
-        const current = started && index === selected;
-        button.setAttribute('aria-disabled', String(locked));
-        if (current) button.setAttribute('aria-current', 'step');
-        else button.removeAttribute('aria-current');
-        const label = `Level ${index + 1}: ${QUEST_LEVELS[index].title}.`;
-        button.setAttribute('aria-label', locked ? `${label} Complete the previous level to unlock.` :
-          `${label}${current ? ' Selected.' : ''}`);
-        state.textContent = locked ? 'Locked' : current ? 'Selected · explored' :
-          index < progress.reached ? 'Explored · revisit' : 'Ready to explore';
-      });
-      const level = QUEST_LEVELS[selected];
-      ui.number.textContent = `Level ${selected + 1} of ${total}`;
-      ui.title.textContent = level.title;
-      ui.learningStatus.textContent = level.learningStatus;
-      ui.blurb.textContent = level.blurb;
-      ui.tags.replaceChildren(...level.tags.map(tag => {
-        const item = document.createElement('li');
-        item.textContent = tag;
-        return item;
-      }));
-      ui.project.hidden = !level.projectUrl;
-      if (level.projectUrl) {
-        ui.project.href = level.projectUrl;
-        const label = level.isTeamProject ? 'View team project' : 'View project';
-        ui.projectLabel.textContent = label;
-        ui.project.setAttribute('aria-label', `${label}: ${level.projectName || level.title} (opens in a new tab)`);
-      } else {
-        ui.project.removeAttribute('href');
-        ui.project.removeAttribute('aria-label');
-        ui.projectLabel.textContent = '';
-      }
-      ui.advance.textContent = selected === total - 1 ? 'Finish quest' : 'Continue to next level';
-      ui.advance.hidden = progress.finished && selected === total - 1;
-      ui.complete.hidden = !started || !progress.finished;
+      suspendWhenQuiet();
+      if (!suspend && state.soundEnabled && audioContext?.state === 'running') ui.soundStatus.textContent = 'Sound on.';
     }
-
-    ui.start.addEventListener('click', () => {
-      const fresh = progress.reached === 0;
-      if (fresh) { progress.reached = 1; saveProgress(); }
-      started = true;
-      selected = progress.reached - 1;
-      render();
-      (progress.finished ? ui.completeTitle : ui.title).focus();
-      ui.announcement.textContent = `${fresh ? 'Quest started.' : 'Quest resumed.'} ${progressText()}.`;
-    });
-    ui.advance.addEventListener('click', () => {
-      if (!started || (progress.finished && selected === total - 1)) return;
-      if (selected < total - 1) {
-        selected += 1;
-        const advanced = selected + 1 > progress.reached;
-        if (advanced) { progress.reached = selected + 1; saveProgress(); }
-        render();
-        ui.title.focus();
-        if (advanced) ui.announcement.textContent = progressText();
-      } else {
-        progress.finished = true;
-        saveProgress();
-        render();
-        ui.completeTitle.focus();
-        ui.announcement.textContent = `Quest finished. ${progressText()}.`;
+    // Only the sound-enabled start and Sound-on toggle create/resume this context.
+    function cancelAudio(suspend = false) {
+      stopEffects(suspend);
+      cancelSpeech();
+    }
+    function enableSound(narrateAfterResume = false) {
+      const generation = ++audioGeneration;
+      try {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) throw new Error('Web Audio unavailable');
+        if (!audioContext) {
+          audioContext = new Audio();
+          masterGain = audioContext.createGain();
+          masterGain.gain.value = 0.1;
+          masterGain.connect(audioContext.destination);
+        }
+        state.soundEnabled = true;
+        const resumed = audioContext.resume();
+        ui.soundStatus.textContent = 'Starting sound…';
+        Promise.resolve(resumed).then(() => {
+          if (generation !== audioGeneration || !active() || !state.soundEnabled) return;
+          ui.soundStatus.textContent = audioContext.state === 'running' ? 'Sound on.' :
+            'Sound paused by the browser. Toggle Sound to retry.';
+          cue('select');
+          if (narrateAfterResume) explain();
+        }).catch(() => {
+          if (generation !== audioGeneration) return;
+          state.soundEnabled = false;
+          syncAudio();
+          ui.soundStatus.textContent = 'Sound unavailable. Silent demos are fully available.';
+          if (narrateAfterResume) explain();
+        });
+      } catch (_) {
+        state.soundEnabled = false;
+        ui.soundStatus.textContent = 'Sound unavailable. Silent demos are fully available.';
+        if (narrateAfterResume) explain();
       }
+      syncAudio();
+    }
+    function cue(kind) {
+      if (!active() || !state.soundEnabled) return 0;
+      if (audioContext?.state !== 'running') {
+        ui.soundStatus.textContent = 'Sound paused by the browser. Toggle Sound to retry.';
+        return 0;
+      }
+      cancelAudio();
+      const frequencies = kind === 'final' ? [261.63, 329.63, 392, 523.25] :
+        kind === 'success' ? [523.25, 659.25, 783.99] : [330];
+      const stagger = kind === 'final' ? 0.12 : 0.105;
+      const notes = frequencies.map((frequency, index) => ({
+        frequency, offset: index * stagger,
+        duration: kind === 'final' ? 0.55 : kind === 'success' ? 0.38 : 0.055,
+        strength: kind === 'final' ? (index === 0 ? 0.35 : 0.65) : 1,
+        attack: kind === 'final' ? 0.04 : 0.015
+      }));
+      if (kind === 'final') {
+        // A soft lead-in and ascending notes resolve into a quiet C-major chord.
+        notes.push(...frequencies.map(frequency => ({
+          frequency, offset: 0.62, duration: 0.86, strength: 0.5, attack: 0.06
+        })));
+      }
+      const length = Math.max(...notes.map(note => note.offset + note.duration));
+      try {
+        masterGain.gain.setValueAtTime(0.1, audioContext.currentTime);
+        notes.forEach(({ frequency, offset, duration, strength, attack }) => {
+          const start = audioContext.currentTime + offset;
+          ['triangle', 'sine'].forEach((type, layer) => {
+            const oscillator = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            oscillator.type = type;
+            oscillator.frequency.value = frequency;
+            const peak = (kind === 'select' ? 0.12 : 0.26) * strength * (layer ? 0.25 : 1);
+            gain.gain.setValueAtTime(0, start);
+            gain.gain.linearRampToValueAtTime(peak, start + attack);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + duration - 0.012);
+            gain.gain.linearRampToValueAtTime(0, start + duration);
+            oscillator.connect(gain);
+            gain.connect(masterGain);
+            oscillators.set(oscillator, { gain, peak });
+            oscillator.onended = () => {
+              oscillators.delete(oscillator);
+              oscillator.disconnect();
+              gain.disconnect();
+            };
+            oscillator.start(start);
+            oscillator.stop(start + duration);
+          });
+        });
+        audioOwner.cueEndsAt = performance.now() + length * 1000;
+        return length * 1000;
+      } catch (_) {
+        state.soundEnabled = false;
+        stopEffects(true);
+        syncAudio();
+        ui.soundStatus.textContent = 'Sound unavailable. Silent demos are fully available.';
+        return 0;
+      }
+    }
+    function updateVoices() {
+      // Voice lists often arrive asynchronously. Loading one never opts the visitor in.
+      try {
+        preferredVoice = canSpeak ? synthesis.getVoices().find(voice =>
+          voice.localService && /^en(?:[-_]|$)/i.test(voice.lang)) || null : null;
+      } catch (_) { preferredVoice = null; }
+    }
+    updateVoices();
+    if (canSpeak) synthesis.addEventListener?.('voiceschanged', updateVoices);
+    function speak(text) {
+      cancelSpeech();
+      if (!state.voiceEnabled || !active()) return;
+      const unavailable = () => {
+        cancelSpeech();
+        ui.voiceStatus.textContent = 'Voice unavailable. Read the text, or switch Voice off and on to retry.';
+      };
+      if (!canSpeak) { unavailable(); return; }
+      const generation = speechGeneration;
+      const narrate = () => {
+        audioOwner.narrationTimer = null;
+        if (generation !== speechGeneration || !state.voiceEnabled || !active()) return;
+        try {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.voice = preferredVoice;
+          utterance.lang = preferredVoice?.lang || 'en';
+          utterance.rate = 0.97;
+          utterance.volume = 0.65;
+          utterance.onstart = () => {
+            if (generation !== speechGeneration) return;
+            if (active()) ui.voiceStatus.textContent = 'Speaking.';
+            else cancelSpeech();
+          };
+          utterance.onend = () => {
+            if (generation !== speechGeneration) return;
+            idleVoiceStatus();
+          };
+          utterance.onerror = () => { if (generation === speechGeneration) unavailable(); };
+          ui.voiceStatus.textContent = 'Voice requested. Waiting for the browser.';
+          synthesis.speak(utterance);
+        } catch (_) { unavailable(); }
+      };
+      const remaining = audioOwner.cueEndsAt - performance.now();
+      if (remaining > 0) {
+        ui.voiceStatus.textContent = 'Voice will follow the sound.';
+        audioOwner.narrationTimer = setTimeout(narrate, Math.ceil(remaining) + 25);
+      } else narrate();
+    }
+    function explain() {
+      if (state.demoPhase === 'running') return;
+      speak(state.storySelected ? closingExplanation() :
+        state.demoPhase === 'completed' ? resultExplanation() : LAB_PROJECTS[state.selectedProject].scenario);
+    }
+    function later(callback, delay) {
+      const generation = demoGeneration;
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (generation === demoGeneration && active()) callback();
+      }, delay);
+      timers.add(timer);
+    }
+    function updateControls() {
+      buttons.forEach(button => {
+        const id = button.dataset.project;
+        const selected = id === state.selectedProject;
+        const explored = state.exploredIds.has(id);
+        button.setAttribute('aria-pressed', String(selected));
+        button.querySelector('.lab-project-state').textContent =
+          `${selected ? 'Selected' : 'Explore'}${explored ? ' · explored' : ''}`;
+        button.querySelector('.lab-check').hidden = !explored;
+      });
+      ui.progress.textContent = `${state.exploredIds.size} / 4 explored`;
+      ui.meter.value = state.exploredIds.size;
+      ui.meter.textContent = `${state.exploredIds.size} / 4`;
+    }
+    function setPhase(phase) {
+      state.demoPhase = phase;
+      ui.details.dataset.phase = phase;
+      ui.details.setAttribute('aria-busy', String(phase === 'running'));
+      ui.demoState.textContent = phase === 'before' ? 'Before' : phase === 'running' ? 'Running' : 'Completed · after';
+      syncAudio();
+    }
+    function showBefore() {
+      const project = LAB_PROJECTS[state.selectedProject];
+      state.storySelected = false;
+      setPhase('before');
+      ui.title.textContent = project.title;
+      ui.scenario.textContent = project.scenario;
+      ui.note.textContent = project.note;
+      ui.repository.href = project.repository;
+      ui.repository.setAttribute('aria-label', `${project.title} repository (opens in a new tab)`);
+      ui.visual.replaceChildren(get(`template-${state.selectedProject}`).content.cloneNode(true));
+      ui.action.disabled = false;
+      ui.action.textContent = project.action;
+      ui.action.setAttribute('aria-controls', 'lab-visual');
+      ui.replay.hidden = true;
+      ui.feedback.hidden = true;
+    }
+    function cancelDemo() {
+      demoGeneration += 1;
+      timers.forEach(clearTimeout);
+      timers.clear();
+      lab.getAnimations({ subtree: true }).forEach(animation => animation.cancel());
+      ui.particles.replaceChildren();
+      ui.complete.classList.remove('is-revealing');
+      finalSequenceActive = false;
+      ui.successParticles.replaceChildren();
+      ui.details.classList.remove('is-success-animating');
+      if (state.demoPhase === 'running') showBefore();
+    }
+    function focusHeading(heading) {
+      heading.focus({ preventScroll: true });
+      heading.scrollIntoView({ block: 'start', behavior: motion.matches ? 'instant' : 'smooth' });
+    }
+    function select(id, guided = false) {
+      cancelDemo();
+      cancelAudio();
+      state.selectedProject = id;
+      updateControls();
+      if (state.started) {
+        showBefore();
+        if (guided) focusHeading(ui.title);
+        announce(`${LAB_PROJECTS[id].title} ready. Choose ${LAB_PROJECTS[id].action}.`);
+        cue('select');
+        explain();
+      } else announce(`${LAB_PROJECTS[id].title} selected. Choose a start option above.`);
+    }
+    function start(withAudio) {
+      state.started = true;
+      state.soundEnabled = false;
+      state.voiceEnabled = withAudio;
+      ui.startOptions.hidden = true;
+      ui.audio.hidden = false;
+      ui.details.hidden = false;
+      showBefore();
+      lab.querySelector('.lab-workbench').scrollIntoView({ block: 'start', behavior: 'instant' });
+      if (withAudio) enableSound(true);
+      else ui.soundStatus.textContent = 'Sound off.';
+      syncAudio();
+      ui.title.focus({ preventScroll: true });
+      announce(`${LAB_PROJECTS[state.selectedProject].title} ready to explore.`);
+      if (!withAudio) idleVoiceStatus();
+    }
+    function revealStory() {
+      if (!state.started || state.exploredIds.size !== LAB_ORDER.length) return;
+      if (state.celebrationShown) {
+        // A second click must neither restart nor cut off the current sequence.
+        if (!finalSequenceActive) cancelAudio();
+        state.storySelected = true;
+        ui.complete.hidden = false;
+        ui.storyTitle.focus({ preventScroll: true });
+        ui.complete.scrollIntoView({ block: 'start', behavior: 'instant' });
+        return;
+      }
+      cancelDemo();
+      cancelAudio();
+      state.celebrationShown = true;
+      state.storySelected = true;
+      finalSequenceActive = true;
+      ui.complete.hidden = false;
+      ui.storyTitle.focus({ preventScroll: true });
+      ui.complete.scrollIntoView({ block: 'start', behavior: 'instant' });
+      cue('final');
+      if (state.voiceEnabled) speak(closingExplanation());
+      if (!motion.matches) {
+        ui.complete.classList.add('is-revealing');
+        ui.particles.replaceChildren(...Array.from({ length: 48 }, (_, index) => {
+          const particle = document.createElement('span');
+          const right = index >= 24;
+          particle.className = right ? 'from-right' : 'from-left';
+          particle.style.setProperty('--x', `${(18 + index % 6 * 17) * (right ? -1 : 1)}px`);
+          particle.style.setProperty('--y', `${18 + index % 8 * 15}px`);
+          particle.style.setProperty('--turn', `${index * 43}deg`);
+          return particle;
+        }));
+      }
+      later(() => {
+        finalSequenceActive = false;
+        ui.complete.classList.remove('is-revealing');
+        ui.particles.replaceChildren();
+      }, 1900);
+      announce('Four projects. One direction. Your builder story is open.');
+    }
+    function finishDemo() {
+      setPhase('completed');
+      state.exploredIds.add(state.selectedProject);
+      updateControls();
+      const project = LAB_PROJECTS[state.selectedProject];
+      const next = nextProject();
+      ui.successTitle.textContent = project.resultTitle;
+      ui.successCopy.textContent = project.result;
+      ui.nextHint.textContent = nextHint();
+      ui.feedback.hidden = false;
+      ui.action.disabled = false;
+      ui.action.textContent = next ? `Next: ${LAB_PROJECTS[next].title} →` : 'See my builder story →';
+      ui.action.setAttribute('aria-controls', next ? 'lab-details' : 'lab-complete');
+      ui.replay.hidden = false;
+      if (!motion.matches) {
+        ui.details.classList.add('is-success-animating');
+        ui.successParticles.replaceChildren(...Array.from({ length: 14 }, (_, index) => {
+          const particle = document.createElement('span');
+          const angle = index / 14 * Math.PI * 2;
+          const radius = 28 + index % 4 * 8;
+          particle.style.setProperty('--x', `${Math.cos(angle) * radius}px`);
+          particle.style.setProperty('--y', `${Math.sin(angle) * radius * 0.55}px`);
+          particle.style.setProperty('--turn', `${index * 47}deg`);
+          return particle;
+        }));
+        later(() => {
+          ui.details.classList.remove('is-success-animating');
+          ui.successParticles.replaceChildren();
+        }, 950);
+      }
+      // Disabling a running action can blur it; restore its keyboard position only
+      // when the visitor has not moved focus to another control in the meantime.
+      if (restoreActionFocus && (document.activeElement === ui.action || document.activeElement === document.body)) {
+        ui.action.focus({ preventScroll: true });
+        ui.response.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      }
+      cue('success');
+      announce(`${project.resultTitle} ${state.exploredIds.size} / 4 explored. ${nextHint()}`);
+      if (state.voiceEnabled) speak(resultExplanation());
+    }
+    function runDemo() {
+      if (!state.started || state.demoPhase !== 'before' || !active()) return;
+      cancelDemo();
+      cancelAudio();
+      restoreActionFocus = document.activeElement === ui.action;
+      setPhase('running');
+      ui.action.disabled = true;
+      ui.action.textContent = 'Making the change…';
+      ui.replay.hidden = false;
+      const find = selector => ui.visual.querySelector(selector);
+      const finish = () => {
+        switch (state.selectedProject) {
+          case 'kapru': find('.lab-result').hidden = false; break;
+          case 'classroom':
+            ui.visual.querySelectorAll('.lab-seat').forEach(seat => seat.classList.add('occupied'));
+            find('.lab-seats').setAttribute('aria-label', 'Six classroom seats, all six occupied');
+            find('[data-occupancy]').textContent = 'HIGH · 6 / 6 seats';
+            find('[data-ac]').textContent = 'AC · cooling';
+            find('[data-ac]').classList.add('is-cooling');
+            break;
+          case 'timealert': find('.lab-notification').hidden = false; break;
+          case 'darkscan':
+            find('.lab-code').classList.remove('is-scanning');
+            find('.lab-code').classList.add('has-finding');
+            find('.lab-finding').hidden = false;
+            break;
+        }
+        finishDemo();
+      };
+      if (state.selectedProject === 'timealert') {
+        find('[data-time]').textContent = '10:00 AM';
+        find('[data-room]').textContent = 'Room B';
+        find('[data-time-field]').classList.add('lab-changed');
+        find('[data-room-field]').classList.add('lab-changed');
+      }
+      if (state.selectedProject === 'darkscan') find('.lab-code').classList.add('is-scanning');
+      if (motion.matches) finish();
+      else later(finish, state.selectedProject === 'darkscan' ? 600 : 300);
+    }
+    function replay() {
+      cancelDemo();
+      cancelAudio();
+      showBefore();
+      // Replay may hide the focused secondary button, so return to the action.
+      ui.action.focus({ preventScroll: true });
+      ui.action.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      announce(`${LAB_PROJECTS[state.selectedProject].title} reset to before. Progress unchanged.`);
+    }
+    function leaveLab() {
+      if (!state.started) return;
+      cancelDemo();
+      stopEffects(true);
+      state.soundEnabled = false;
+      state.voiceEnabled = false;
+      cancelSpeech();
+      syncAudio();
+      ui.soundStatus.textContent = 'Sound off. Use the toggles to enable audio again.';
+    }
+    buttons.forEach(button => {
+      button.disabled = false;
+      button.addEventListener('click', () => select(button.dataset.project));
     });
+    ui.start.addEventListener('click', () => start(true));
+    ui.silent.addEventListener('click', () => start(false));
+    ui.sound.addEventListener('click', () => {
+      if (state.soundEnabled) {
+        state.soundEnabled = false;
+        state.voiceEnabled = false;
+        cancelAudio(true);
+        ui.soundStatus.textContent = 'Sound off.';
+      } else enableSound();
+      syncAudio();
+    });
+    ui.voice.addEventListener('click', () => {
+      state.voiceEnabled = !state.voiceEnabled;
+      if (state.voiceEnabled) {
+        if (state.demoPhase === 'running') idleVoiceStatus();
+        else explain();
+      } else cancelSpeech();
+      syncAudio();
+    });
+    ui.action.addEventListener('click', () => {
+      if (state.demoPhase === 'completed') {
+        const next = nextProject();
+        if (next) select(next, true);
+        else revealStory();
+      } else runDemo();
+    });
+    ui.replay.addEventListener('click', replay);
     ui.reset.addEventListener('click', () => {
-      progress = { reached: 0, finished: false };
-      selected = 0;
-      started = false;
-      try { localStorage.removeItem(QUEST_STORAGE_KEY); } catch (_) {}
-      render();
-      ui.start.focus();
-      ui.announcement.textContent = `Quest reset. ${progressText()}.`;
+      // Preserve this visit's explicit Sound/Voice choices across a fresh run.
+      cancelDemo();
+      cancelAudio();
+      state.selectedProject = 'kapru';
+      state.exploredIds.clear();
+      state.celebrationShown = false;
+      ui.complete.hidden = true;
+      updateControls();
+      showBefore();
+      focusHeading(ui.title);
+      announce('New exploration. 0 / 4 explored. Kapru is ready.');
+      if (state.voiceEnabled) explain();
     });
-    const hint = document.querySelector('.lab-hint[href="#creative-feature"]');
-    hint?.addEventListener('click', event => {
+    document.addEventListener('visibilitychange', () => { if (document.hidden) leaveLab(); });
+    addEventListener('pagehide', leaveLab);
+    document.querySelectorAll('a[href^="#"]').forEach(link => {
+      if (link.hash !== '#creative-feature') link.addEventListener('click', leaveLab);
+    });
+    lab.addEventListener('focusout', event => {
+      if (event.relatedTarget && !lab.contains(event.relatedTarget)) leaveLab();
+    });
+    document.addEventListener('pointerdown', event => { if (!lab.contains(event.target)) leaveLab(); }, { passive: true });
+    addEventListener('scroll', () => { if (!active()) leaveLab(); }, { passive: true });
+    watch(motion, () => { if (motion.matches) cancelDemo(); });
+    document.querySelector('.lab-hint[href="#creative-feature"]')?.addEventListener('click', event => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      // Let the normal fragment navigation run first, retaining its reduced-motion behavior.
-      requestAnimationFrame(() => ui.start.focus({ preventScroll: true }));
+      requestAnimationFrame(() => (state.started ? ui.sound : ui.start).focus({ preventScroll: true }));
     });
-    render(); // Restore quietly: no focus change, announcement, or entrance animation.
-    ui.start.hidden = false;
+    updateControls();
+    ui.startOptions.hidden = false;
   }
+
 
   function setupHero() {
     const art = document.querySelector('.hero-orbit');
@@ -817,7 +1192,7 @@
   }
 
   // Fail independently: a broken optional enhancement cannot disable navigation.
-  [setupTheme, setupMenu, setupQuest, setupScroll, setupHero, setupPointerEffects, setupReveals].forEach(setup => {
+  [setupTheme, setupMenu, setupBuilderLab, setupScroll, setupHero, setupPointerEffects, setupReveals].forEach(setup => {
     try { setup(); } catch (error) { console.warn(`Portfolio: ${setup.name} unavailable`, error); }
   });
 })();
