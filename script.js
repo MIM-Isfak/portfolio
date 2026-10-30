@@ -312,22 +312,15 @@
   function setupHero() {
     const art = document.querySelector('.hero-orbit');
     const cv = art?.querySelector('.hero-orbit-canvas');
-    const terminal = art?.querySelector('.hero-terminal');
-    const word = art?.querySelector('.hero-terminal-word');
-    const cursor = art?.querySelector('.hero-terminal-cursor');
     const ctx = cv?.getContext('2d');
-    if (!art || !ctx || !terminal || !word || !cursor || art.dataset.heroReady) return;
+    if (!art || !ctx || art.dataset.heroReady) return;
     art.dataset.heroReady = 'true';
 
     let W = 0, H = 0, M = 0, R = 0, badgeUnit = 1;
     let colors, LIME, LINE;
     let frame = null, elapsed = 0, startedAt = 0, running = false, visible = false;
-    let timer = null, due = 0, remaining = 1800, typingStarted = false;
-    let length = 1, phase = 'initial';
-    let exclusion = null;
     const previousCenters = new Map(), maxBadgeSizes = new Map();
     let placementTime = null;
-    const name = 'Isfak';
 
     /* a = plane tilt, b = roll, w = orbit spin speed (atom precession), p = start phase, s = node speed */
     const O=[
@@ -372,12 +365,12 @@
       return a.x < b.x + b.width && a.x + a.width > b.x &&
         a.y < b.y + b.height && a.y + a.height > b.y;
     }
-    // Move through free space around the padded name and other label slots.
+    // Move through free space around other label slots.
     function routeStep(start, goal, obstacles, width, height, distance) {
       const halfW = width / 2 + 1, halfH = height / 2 + 1;
       const bounds = { left: halfW + 1, top: halfH + 1, right: W - halfW - 1, bottom: H - halfH - 1 };
-      const blocked = obstacles.map((box, i) => {
-        const pad = i ? 1 : 0;
+      const blocked = obstacles.map(box => {
+        const pad = 1;
         return { left: box.x - halfW - pad, right: box.x + box.width + halfW + pad,
           top: box.y - halfH - pad, bottom: box.y + box.height + halfH + pad };
       });
@@ -433,7 +426,7 @@
         const width = node.size.layoutWidth, height = node.size.layoutHeight;
         const originX = node.x - width / 2, originY = node.y - height / 2;
         const previous = previousCenters.get(node.o.label);
-        const obstacles = [exclusion, ...placed, ...locked];
+        const obstacles = [...placed, ...locked];
         const xs = [originX, margin, W - width - margin];
         const ys = [originY, margin, H - height - margin];
         if (previous) { xs.push(previous.x - width / 2); ys.push(previous.y - height / 2); }
@@ -446,7 +439,7 @@
           const box = { x, y, width, height };
           const ink = { x: x - 1, y: y - 1, width: width + 2, height: height + 2 };
           if (x < margin || y < margin || x + width > W - margin || y + height > H - margin ||
-              obstacles.some((obstacle, i) => intersects(ink, i === 0 ? obstacle :
+              obstacles.some(obstacle => intersects(ink,
                 { x: obstacle.x - 1, y: obstacle.y - 1, width: obstacle.width + 2, height: obstacle.height + 2 }))) continue;
           const key = `${x.toFixed(3)},${y.toFixed(3)}`;
           if (seen.has(key)) continue;
@@ -531,7 +524,7 @@
         const p = pt(o, o.p + o.s * t, t);
         return { o, p, x: cx + p[0] * R, y: cy + p[1] * R, size: badgeSize(o, p[2]) };
       });
-      // Place the compact ML badge first so it can use the narrower side corridors.
+      // Place the compact ML badge first to preserve stable label priority.
       nodes.sort((a, b) => ['ML', 'CLOUD', 'CODE'].indexOf(a.o.label) - ['ML', 'CLOUD', 'CODE'].indexOf(b.o.label));
       const labels = placeBadges(nodes, t);
       for (const node of labels) {
@@ -565,11 +558,6 @@
       cv.width = Math.round(W * dpr);
       cv.height = Math.round(H * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      terminal.style.fontSize = `${M * 0.075}px`;
-      const textRect = terminal.getBoundingClientRect(), canvasRect = cv.getBoundingClientRect();
-      // The terminal always reserves all six characters, even while typing.
-      exclusion = { x: textRect.left - canvasRect.left - 12, y: textRect.top - canvasRect.top - 12,
-        width: textRect.width + 24, height: textRect.height + 24 };
       previousCenters.clear();
       placementTime = null;
       // Keep the reference's depth scale, with a legible base size in this smaller slot.
@@ -592,42 +580,6 @@
       drawHero(activeTime(now));
       frame = requestAnimationFrame(animateHero);
     }
-    function renderName() {
-      const text = motion.matches ? name : name.slice(0, length);
-      if (word.textContent !== text) word.textContent = text;
-      cursor.style.setProperty('--typed-length', text.length);
-      cursor.classList.toggle('is-blinking', running && ['initial', 'holding', 'empty'].includes(phase));
-    }
-    function scheduleTyping() {
-      if (!running || timer !== null) return;
-      due = performance.now() + remaining;
-      timer = setTimeout(advanceTyping, remaining);
-    }
-    function pauseTyping() {
-      if (timer === null) return;
-      remaining = Math.max(0, due - performance.now());
-      clearTimeout(timer);
-      timer = null;
-    }
-    function advanceTyping() {
-      timer = null;
-      if (!running) return;
-      if (phase === 'initial') {
-        length = 2; phase = 'typing'; remaining = 150;
-      } else if (phase === 'typing') {
-        if (length < name.length) { length += 1; remaining = 150; }
-        else { phase = 'holding'; remaining = 2000; }
-      } else if (phase === 'holding') {
-        length -= 1; phase = 'deleting'; remaining = 80;
-      } else if (phase === 'deleting') {
-        if (length > 0) { length -= 1; remaining = 80; }
-        else { phase = 'empty'; remaining = 700; }
-      } else {
-        length = 1; phase = 'typing'; remaining = 150;
-      }
-      renderName();
-      scheduleTyping();
-    }
     function syncMotion() {
       const active = visible && !document.hidden && !motion.matches;
       if (running && !active) {
@@ -635,18 +587,11 @@
         running = false;
         cancelAnimationFrame(frame);
         frame = null;
-        pauseTyping();
       } else if (!running && active) {
         running = true;
         startedAt = performance.now();
-        if (!typingStarted) {
-          typingStarted = true; length = 1; phase = 'initial'; remaining = 1800;
-        }
         frame = requestAnimationFrame(animateHero);
       }
-      if (motion.matches) typingStarted = false;
-      if (typingStarted || motion.matches) renderName();
-      scheduleTyping();
       if (!running) drawHero(motion.matches ? 0 : activeTime());
     }
     refreshColors();

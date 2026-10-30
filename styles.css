@@ -76,15 +76,10 @@ h1 { font-size: clamp(43px, 7vw, 86px); line-height: 1.06; font-weight: 750; let
 }
 .hero .quest-cta:active { transform: translateY(1px); background: var(--accent-hover); color: var(--on-accent); }
 .hero-art { position: relative; align-self: center; margin-top: 12px; }
-.hero-orbit { position: relative; width: 100%; max-width: 390px; aspect-ratio: 1.05; margin-inline: auto; container-type: inline-size; pointer-events: none; }
+.hero-orbit { position: relative; width: 100%; max-width: 390px; aspect-ratio: 1.05; margin-inline: auto; pointer-events: none; }
 .hero-orbit::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 49% 49% at 50% 50%, var(--glow), transparent 100%); }
 .hero-orbit-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.hero-terminal { position: absolute; left: 50%; top: 50%; width: 6ch; height: 1.2em; transform: translate(-50%, -50%); white-space: nowrap; text-align: left; font: 700 28px/1.2 var(--mono); font-size: 7.5cqw; color: var(--accent); text-shadow: 0 0 14px var(--glow); }
-.hero-terminal-word { display: block; width: 5ch; }
-.hero-terminal-cursor { position: absolute; top: 0; left: 0; width: 1ch; transform: translateX(calc(var(--typed-length, 5) * 1ch)); }
-.hero-terminal-cursor.is-blinking { animation: hero-terminal-blink 1s steps(1) infinite; }
-@keyframes hero-terminal-blink { 50% { opacity: 0; } }
-.hero-footnote { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; color: var(--muted); font: 13px var(--mono); border-bottom: 1px solid var(--line); padding-block: 30px; }
+.hero-footnote { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; color: var(--muted); font: 13px var(--mono); border-bottom: 1px solid var(--line); padding-block: 30px; }
 .section { padding-block: 65px; border-bottom: 1px solid var(--line); }
 h2 { font-size: clamp(30px, 4vw, 45px); line-height: 1.15; letter-spacing: -.045em; margin-bottom: 26px; font-weight: 600; }
 .section-heading .eyebrow { margin-bottom: 16px; }
@@ -199,7 +194,7 @@ h1 { font-size: clamp(38px, 6.2vw, 78px); }
 .contact-links { min-width: 0; font-size: 17px; }
 .contact-links a { justify-content: space-between; padding: 8px 0; }
 .contact-links a > span[aria-hidden] { flex-shrink: 0; padding: 4px; }
-.footer-bottom { gap: 16px; }.footer-bottom > a { align-self: flex-start; }
+.footer-bottom { gap: 16px; }.footer-bottom > a:last-child { align-self: flex-end; }
 /* Decorative layers must never intercept a link, card, or button. */
 ::before, ::after, [aria-hidden="true"], .project-art,
 .scroll-progress, .site-glow, .cursor-dot, .cursor-ring { pointer-events: none; }
@@ -320,5 +315,4 @@ main, .site-footer { position: relative; z-index: 1; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .reveal-pending, .reveal-visible { opacity: 1; transform: none; }
   .button, button, .skill-card, .project-card, a { transform: none !important; }
-  .hero-terminal-cursor { opacity: 1; }
 }

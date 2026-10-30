@@ -8,7 +8,7 @@ Open `index.html` directly, or run `python -m http.server 8000` in the repositor
 
 - `index.html`: content, semantic structure, inline SVG emoji favicon, metadata, and the small pre-paint theme script.
 - `styles.css`: both theme palettes, responsive layout, scoped hero styling, project artwork and motion preferences. The stylesheet retains its original plural filename.
-- `script.js`: the Canvas orbit and terminal typing, theme switching, mobile navigation, active section, progress bar, scroll reveals, desktop pointer effects and the Learning Quest.
+- `script.js`: the Canvas orbit, theme switching, mobile navigation, active section, progress bar, scroll reveals, desktop pointer effects and the Learning Quest.
 - `favicon.svg`: the original standalone favicon, retained as an optional alternative to the inline favicon.
 
 All file references are relative. The favicon is embedded and needs no network request.
@@ -44,11 +44,9 @@ Use Tab and Shift+Tab to move among controls, and Enter or Space to activate but
 
 ## Hero artwork
 
-The open hero artwork uses Canvas 2D to project three rotating 3D orbit planes. CODE, CLOUD and ML travel on their corresponding tracks using the same `pt()` projection and elapsed time. Badges retain depth-based size and opacity. Collision-aware label placement keeps them away from the full-name rectangle and other badges; displaced labels have thin leaders to anchors at their true projected positions. Theme colors come from the existing CSS variables, and the radial glow fades to transparent before the artwork edges.
+The open hero artwork uses Canvas 2D to project three rotating 3D orbit planes. CODE, CLOUD and ML travel on their corresponding tracks using the same `pt()` projection and elapsed time. Badges retain depth-based size and opacity. Collision-aware label placement keeps them away from other badges; displaced labels have thin leaders to anchors at their true projected positions. Theme colors come from the existing CSS variables, and the radial glow fades to transparent before the artwork edges.
 
-The centered terminal name is separate DOM content above the decorative canvas. It repeats the supplied typing sequence: an initial 1.8-second `I_` hold, 150ms character additions, a 2-second full-name hold, 80ms deletions and a 700ms empty-cursor hold before typing again. Character-step delays also complete before the holds, matching the reference. The complete name width and height are reserved to prevent typing layout shifts. With JavaScript disabled, the full `Isfak_` remains visible.
-
-One owned animation-frame loop renders the canvas and one cancellable timer drives typing. Both pause when the artwork is offscreen or the document is hidden, preserving active elapsed time and the remaining typing delay. Theme changes refresh colors without restarting the loops. ResizeObserver updates the canvas to its container, with backing-store devicePixelRatio capped at 2.
+One owned animation-frame loop renders the canvas. It pauses when the artwork is offscreen or the document is hidden, preserving active elapsed time. Theme changes refresh colors without restarting the loop. ResizeObserver updates the canvas to its container, with backing-store devicePixelRatio capped at 2.
 
 ## Themes and accessibility
 
@@ -58,9 +56,9 @@ The initial theme follows the operating system unless the visitor has explicitly
 
 Navigation collapses below 720px, closes on link selection, outside click, focus leaving the navigation, or Escape, and restores focus to the menu button for Escape. Without JavaScript the links stay visible and wrap naturally. Keyboard focus outlines and a skip link are retained.
 
-With `prefers-reduced-motion: reduce`, the hero shows a static orbit composition and the full name, with no cursor blinking. Pointer effects, tilt, smooth scrolling and scroll reveals are disabled; the static radial artwork glow remains. Live preference changes are handled, and returning to normal motion starts one typing loop while resuming orbit active time.
+With `prefers-reduced-motion: reduce`, the hero shows a static orbit composition. Pointer effects, tilt, smooth scrolling and scroll reveals are disabled; the static radial artwork glow remains. Live preference changes are handled, and returning to normal motion resumes orbit active time.
 
-There is **no in-page pause control**. Under normal motion preferences, the orbit and terminal typing repeat while visible. Reduced-motion support and offscreen pausing do not replace a visitor-operated pause control, and this portfolio does not claim full WCAG compliance.
+There is **no in-page pause control**. Under normal motion preferences, the orbit animates while visible. Reduced-motion support and offscreen pausing do not replace a visitor-operated pause control, and this portfolio does not claim full WCAG compliance.
 
 On fine-pointer devices without reduced motion, the page retains its custom cursor, pointer-following glow and card spotlights; project cards also tilt. These pointer effects are removed on touch-only or reduced-motion settings, restoring the native cursor. Keyboard focus outlines and the skip link remain available. Without JavaScript, core content and navigation remain readable.
 
