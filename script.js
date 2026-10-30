@@ -39,7 +39,7 @@
     {
       id: 'cloud-deployment', title: 'Cloud & Deployment — Boss Level',
       learningStatus: 'In progress',
-      blurb: 'This portfolio is my AWS deployment challenge and one step towards my goal of becoming an MLOps or DevOps Engineer.',
+      blurb: 'You are exploring it now: this portfolio is hosted on AWS Amplify Hosting. Deploying it is one practical step towards my goal of becoming an MLOps or DevOps Engineer.',
       tags: ['AWS Amplify', 'Deployment', 'Reliability'], projectUrl: null
     }
   ];

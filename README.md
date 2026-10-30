@@ -2,6 +2,10 @@
 
 Hi, I’m Mohamed, a second-year Computer Science undergraduate at the University of Jaffna, Sri Lanka. I’m working toward a career in MLOps and ML Systems Engineering, and serve as Community & Outreach Lead for the AWS Student Builder Group at my university.
 
+## Live Website
+
+[Visit the portfolio](https://main.d1fiqe49r0snk.amplifyapp.com)
+
 ## Features
 
 - Responsive layout with light and dark themes
@@ -51,7 +55,7 @@ The six levels follow my learning journey: Programming Foundations, Software Dev
 
 ## AWS Amplify deployment (optional)
 
-AWS Amplify Hosting is a possible deployment target; deployment has not been verified. For a static deployment, publish this allowlist while preserving paths:
+Hosted on AWS Amplify Hosting, connected to this repository’s `main` branch. For a static deployment, publish this allowlist while preserving paths:
 
 ```text
 index.html
