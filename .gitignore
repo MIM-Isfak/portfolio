@@ -1,0 +1,8 @@
+# Local review screenshots, recordings and verification reports.
+/artifacts/
+
+# Generated local audit outputs, if saved in the repository root.
+/portfolio-final-audit-browser.json
+/portfolio-audit-gitleaks.json
+/portfolio-*-results.json
+/portfolio-*.log
