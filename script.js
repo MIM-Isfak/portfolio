@@ -85,7 +85,7 @@
     const button = document.querySelector('.menu-toggle');
     const menu = document.getElementById(button?.getAttribute('aria-controls') || '');
     if (!nav || !button || !menu) return; // Keep the plain links visible.
-    const mobile = media('(max-width: 719px)');
+    const mobile = media('(max-width: 859px)');
     function close(returnFocus = false) {
       nav.classList.remove('menu-open');
       button.setAttribute('aria-expanded', 'false');
@@ -168,8 +168,8 @@
     };
     let audioContext = null, masterGain = null, audioGeneration = 0, speechGeneration = 0, demoGeneration = 0;
     // One pending narration belongs to the current audio sequence; never a speech queue.
-    const audioOwner = { narrationTimer: null, cueEndsAt: 0 };
-    let preferredVoice = null, restoreActionFocus = false, finalSequenceActive = false;
+    const audioOwner = { narrationTimer: null, voiceWatchdog: null, cueEndsAt: 0 };
+    let preferredVoice = null, voiceUnavailable = false, restoreActionFocus = false, finalSequenceActive = false;
     const timers = new Set(), oscillators = new Map();
     const synthesis = window.speechSynthesis;
     const canSpeak = Boolean(synthesis && window.SpeechSynthesisUtterance);
@@ -196,11 +196,13 @@
       ui.voice.setAttribute('aria-pressed', String(state.voiceEnabled));
     }
     function idleVoiceStatus() {
-      ui.voiceStatus.textContent = state.voiceEnabled ? 'Voice on.' : 'Voice off.';
+      ui.voiceStatus.textContent = voiceUnavailable ? 'Voice unavailable. Read the text, or switch Voice on to retry.' :
+        state.voiceEnabled ? 'Voice on.' : 'Voice off.';
     }
     function cancelSpeech() {
       speechGeneration += 1;
       clearTimeout(audioOwner.narrationTimer);
+      clearTimeout(audioOwner.voiceWatchdog);
       audioOwner.narrationTimer = null;
       if (canSpeak) synthesis.cancel();
       idleVoiceStatus();
@@ -210,6 +212,8 @@
       audioOwner.cueEndsAt = 0;
       const running = audioContext?.state === 'running';
       const now = audioContext?.currentTime || 0;
+      const hadNotes = oscillators.size > 0;
+      const releaseDuration = 0.012;
       const suspendWhenQuiet = () => {
         if (suspend && generation === audioGeneration && !oscillators.size && audioContext?.state === 'running') {
           audioContext.suspend().catch(() => {});
@@ -231,8 +235,8 @@
             // Never boost a quiet/releasing layer to AudioParam's default value.
             gain.gain.setValueAtTime(Math.min(peak, Math.max(0, gain.gain.value)), now);
           }
-          gain.gain.linearRampToValueAtTime(0, now + 0.012);
-          oscillator.stop(now + 0.012);
+          gain.gain.linearRampToValueAtTime(0, now + releaseDuration);
+          oscillator.stop(now + releaseDuration);
         } else {
           try { oscillator.stop(); } catch (_) {}
           release();
@@ -240,6 +244,8 @@
       });
       suspendWhenQuiet();
       if (!suspend && state.soundEnabled && audioContext?.state === 'running') ui.soundStatus.textContent = 'Sound on.';
+      return running && hadNotes ?
+        (releaseDuration + (audioContext.baseLatency || 0) + (audioContext.outputLatency || 0)) * 1000 : 0;
     }
     // Only the sound-enabled start and Sound-on toggle create/resume this context.
     function cancelAudio(suspend = false) {
@@ -254,7 +260,7 @@
         if (!audioContext) {
           audioContext = new Audio();
           masterGain = audioContext.createGain();
-          masterGain.gain.value = 0.1;
+          masterGain.gain.value = 0.16;
           masterGain.connect(audioContext.destination);
         }
         state.soundEnabled = true;
@@ -304,9 +310,11 @@
       }
       const length = Math.max(...notes.map(note => note.offset + note.duration));
       try {
-        masterGain.gain.setValueAtTime(0.1, audioContext.currentTime);
+        // All layers share one schedule origin and ample summed-signal headroom.
+        const origin = audioContext.currentTime + 0.008;
+        masterGain.gain.setValueAtTime(0.16, audioContext.currentTime);
         notes.forEach(({ frequency, offset, duration, strength, attack }) => {
-          const start = audioContext.currentTime + offset;
+          const start = origin + offset;
           ['triangle', 'sine'].forEach((type, layer) => {
             const oscillator = audioContext.createOscillator();
             const gain = audioContext.createGain();
@@ -329,7 +337,7 @@
             oscillator.stop(start + duration);
           });
         });
-        audioOwner.cueEndsAt = performance.now() + length * 1000;
+        audioOwner.cueEndsAt = origin + length;
         return length * 1000;
       } catch (_) {
         state.soundEnabled = false;
@@ -342,8 +350,9 @@
     function updateVoices() {
       // Voice lists often arrive asynchronously. Loading one never opts the visitor in.
       try {
-        preferredVoice = canSpeak ? synthesis.getVoices().find(voice =>
-          voice.localService && /^en(?:[-_]|$)/i.test(voice.lang)) || null : null;
+        const english = canSpeak ? synthesis.getVoices().filter(voice => /^en(?:[-_]|$)/i.test(voice.lang)) : [];
+        // Use an installed English voice; never select a remote TTS service.
+        preferredVoice = english.find(voice => voice.localService) || null;
       } catch (_) { preferredVoice = null; }
     }
     updateVoices();
@@ -352,15 +361,38 @@
       cancelSpeech();
       if (!state.voiceEnabled || !active()) return;
       const unavailable = () => {
+        voiceUnavailable = true;
         cancelSpeech();
-        ui.voiceStatus.textContent = 'Voice unavailable. Read the text, or switch Voice off and on to retry.';
+        state.voiceEnabled = false;
+        syncAudio();
+        ui.voiceStatus.textContent = 'Voice unavailable. Read the text, or switch Voice on to retry.';
       };
       if (!canSpeak) { unavailable(); return; }
       const generation = speechGeneration;
+      let voiceWaitStarted = null;
       const narrate = () => {
         audioOwner.narrationTimer = null;
         if (generation !== speechGeneration || !state.voiceEnabled || !active()) return;
+        // Recheck the audio clock: a delayed/suspended context must not let
+        // narration jump ahead of the scheduled release tail or output latency.
+        const remaining = state.soundEnabled && audioContext?.state === 'running' ?
+          audioOwner.cueEndsAt - audioContext.currentTime + (audioContext.baseLatency || 0) + (audioContext.outputLatency || 0) : 0;
+        if (remaining > 0) {
+          ui.voiceStatus.textContent = 'Voice will follow the sound.';
+          audioOwner.narrationTimer = setTimeout(narrate, Math.ceil(remaining * 1000) + 20);
+          return;
+        }
         try {
+          updateVoices();
+          if (!preferredVoice) {
+            // OS voice lists can arrive after page load. Wait briefly, with the
+            // same cancellation owner as cue sequencing, before falling back to text.
+            if (voiceWaitStarted === null) voiceWaitStarted = performance.now();
+            if (performance.now() - voiceWaitStarted >= 1500) { unavailable(); return; }
+            ui.voiceStatus.textContent = 'Loading an installed English voice…';
+            audioOwner.narrationTimer = setTimeout(narrate, 100);
+            return;
+          }
           const utterance = new SpeechSynthesisUtterance(text);
           utterance.voice = preferredVoice;
           utterance.lang = preferredVoice?.lang || 'en';
@@ -368,6 +400,7 @@
           utterance.volume = 0.65;
           utterance.onstart = () => {
             if (generation !== speechGeneration) return;
+            clearTimeout(audioOwner.voiceWatchdog);
             if (active()) ui.voiceStatus.textContent = 'Speaking.';
             else cancelSpeech();
           };
@@ -377,14 +410,13 @@
           };
           utterance.onerror = () => { if (generation === speechGeneration) unavailable(); };
           ui.voiceStatus.textContent = 'Voice requested. Waiting for the browser.';
+          audioOwner.voiceWatchdog = setTimeout(() => {
+            if (generation === speechGeneration) unavailable();
+          }, 5000);
           synthesis.speak(utterance);
         } catch (_) { unavailable(); }
       };
-      const remaining = audioOwner.cueEndsAt - performance.now();
-      if (remaining > 0) {
-        ui.voiceStatus.textContent = 'Voice will follow the sound.';
-        audioOwner.narrationTimer = setTimeout(narrate, Math.ceil(remaining) + 25);
-      } else narrate();
+      narrate();
     }
     function explain() {
       if (state.demoPhase === 'running') return;
@@ -405,8 +437,10 @@
         const selected = id === state.selectedProject;
         const explored = state.exploredIds.has(id);
         button.setAttribute('aria-pressed', String(selected));
-        button.querySelector('.lab-project-state').textContent =
-          `${selected ? 'Selected' : 'Explore'}${explored ? ' · explored' : ''}`;
+        button.dataset.explored = String(explored);
+        button.querySelector('.lab-project-state').textContent = selected && state.started ?
+          (state.demoPhase === 'running' ? 'Running…' : state.demoPhase === 'completed' ? 'Completed · explored' : `Selected${explored ? ' · explored' : ''}`) :
+          (explored ? 'Explored · revisit' : selected ? 'Selected' : 'Ready to explore');
         button.querySelector('.lab-check').hidden = !explored;
       });
       ui.progress.textContent = `${state.exploredIds.size} / 4 explored`;
@@ -418,6 +452,7 @@
       ui.details.dataset.phase = phase;
       ui.details.setAttribute('aria-busy', String(phase === 'running'));
       ui.demoState.textContent = phase === 'before' ? 'Before' : phase === 'running' ? 'Running' : 'Completed · after';
+      updateControls();
       syncAudio();
     }
     function showBefore() {
@@ -450,7 +485,9 @@
     }
     function focusHeading(heading) {
       heading.focus({ preventScroll: true });
-      heading.scrollIntoView({ block: 'start', behavior: motion.matches ? 'instant' : 'smooth' });
+      // Keep guided controls stable even when Next and the following action are
+      // used quickly; a second smooth scroll can otherwise move the hit target.
+      heading.scrollIntoView({ block: 'start', behavior: 'instant' });
     }
     function select(id, guided = false) {
       cancelDemo();
@@ -504,13 +541,28 @@
       if (state.voiceEnabled) speak(closingExplanation());
       if (!motion.matches) {
         ui.complete.classList.add('is-revealing');
-        ui.particles.replaceChildren(...Array.from({ length: 48 }, (_, index) => {
+        const reach = Math.min(ui.complete.clientWidth * .29, 230);
+        // Two balanced waves share one bounded node set and the existing cleanup
+        // owner. Their longer flight never changes the sound or narration clocks.
+        ui.particles.replaceChildren(...Array.from({ length: 64 }, (_, index) => {
           const particle = document.createElement('span');
-          const right = index >= 24;
+          const wave = Math.floor(index / 32);
+          const slot = index % 16;
+          const right = index % 32 >= 16;
           particle.className = right ? 'from-right' : 'from-left';
-          particle.style.setProperty('--x', `${(18 + index % 6 * 17) * (right ? -1 : 1)}px`);
-          particle.style.setProperty('--y', `${18 + index % 8 * 15}px`);
-          particle.style.setProperty('--turn', `${index * 43}deg`);
+          particle.style.setProperty('--flight-delay', `${wave * .68 + slot % 5 * .035}s`);
+          particle.style.setProperty('--flight-time', `${1.85 + slot % 4 * .065}s`);
+          particle.style.setProperty('--particle-width', `${3 + slot % 3}px`);
+          particle.style.setProperty('--particle-height', `${5 + slot % 4}px`);
+          const travel = reach * (.4 + slot / 25) * (right ? -1 : 1);
+          const rise = 52 + slot % 7 * 11;
+          const drop = 64 + slot % 5 * 13;
+          for (const percent of [25, 50, 75, 100]) {
+            const t = percent / 100;
+            particle.style.setProperty(`--x${percent}`, `${travel * t}px`);
+            particle.style.setProperty(`--y${percent}`, `${-4 * rise * t * (1 - t) + drop * t * t}px`);
+            particle.style.setProperty(`--r${percent}`, `${(120 + slot * 23) * t * (right ? -1 : 1)}deg`);
+          }
           return particle;
         }));
       }
@@ -518,7 +570,7 @@
         finalSequenceActive = false;
         ui.complete.classList.remove('is-revealing');
         ui.particles.replaceChildren();
-      }, 1900);
+      }, 3000);
       announce('Four projects. One direction. Your builder story is open.');
     }
     function finishDemo() {
@@ -628,15 +680,21 @@
     ui.sound.addEventListener('click', () => {
       if (state.soundEnabled) {
         state.soundEnabled = false;
-        state.voiceEnabled = false;
-        cancelAudio(true);
+        const releaseDelay = stopEffects(true);
+        // Sound and Voice are independent. Move a waiting explanation to voice
+        // alone after the cancellation fade, without leaving a stale callback.
+        if (state.voiceEnabled && audioOwner.narrationTimer !== null) {
+          cancelSpeech();
+          audioOwner.narrationTimer = setTimeout(explain, Math.ceil(releaseDelay));
+        }
         ui.soundStatus.textContent = 'Sound off.';
-      } else enableSound();
+      } else enableSound(state.voiceEnabled);
       syncAudio();
     });
     ui.voice.addEventListener('click', () => {
       state.voiceEnabled = !state.voiceEnabled;
       if (state.voiceEnabled) {
+        voiceUnavailable = false;
         if (state.demoPhase === 'running') idleVoiceStatus();
         else explain();
       } else cancelSpeech();
@@ -686,311 +744,194 @@
 
   function setupHero() {
     const art = document.querySelector('.hero-orbit');
-    const cv = art?.querySelector('.hero-orbit-canvas');
+    const cv = art?.querySelector('canvas');
     const ctx = cv?.getContext('2d');
-    if (!art || !ctx || art.dataset.heroReady) return;
+    if (!ctx || art.dataset.heroReady) return;
     art.dataset.heroReady = 'true';
-
-    let W = 0, H = 0, M = 0, R = 0, badgeUnit = 1;
-    let colors, LIME, LINE;
-    let frame = null, elapsed = 0, startedAt = 0, running = false, visible = false;
-    const previousCenters = new Map(), maxBadgeSizes = new Map();
-    let placementTime = null;
-
-    /* a = plane tilt, b = roll, w = orbit spin speed (atom precession), p = start phase, s = node speed */
-    const O=[
-      {a:1.10,b:0.15,w:0.22,p:-1.57,s:0.55,label:'CODE',icon:'code'},
-      {a:1.15,b:-0.55,w:-0.17,p:3.14,s:-0.42,label:'CLOUD',icon:'cloud'},
-      {a:1.00,b:0.95,w:0.13,p:1.57,s:0.36,label:'ML',icon:'ml'}
-    ];
-    function pt(o,phi,t){
-      const x=Math.cos(phi),y=Math.sin(phi);
-      const y1=y*Math.cos(o.a),z1=y*Math.sin(o.a);
-      const x2=x*Math.cos(o.b)-y1*Math.sin(o.b),y2=x*Math.sin(o.b)+y1*Math.cos(o.b);
-      const th=o.w*t;
-      return [x2*Math.cos(th)+z1*Math.sin(th),y2,-x2*Math.sin(th)+z1*Math.cos(th)];
+    let width = 0, height = 0, radius = 0, frame = 0, last = 0, angle = .35;
+    let orbitTime = 0;
+    let inView = false, mx = 0, my = 0, targetX = 0, targetY = 0;
+    let colors = {};
+    const tau = Math.PI * 2;
+    const badges = [...art.querySelectorAll('.orbit-badge')].map((element, index) => ({
+      element, width: 0, height: 0,
+      phase: [4.2, 4.95, 1.4][index], speed: [.17, -.135, .115][index],
+      roll: [-.55, .7, .05][index], tilt: [.9, 1.05, .8][index]
+    }));
+    function satellite(badge, phase) {
+      const reach = Math.max(0, width / 2 - badge.width / 2 - 12);
+      const x = Math.cos(phase) * reach;
+      const y = Math.sin(phase) * reach * Math.cos(badge.tilt);
+      return {
+        x: width / 2 + x * Math.cos(badge.roll) - y * Math.sin(badge.roll),
+        y: height * .49 + x * Math.sin(badge.roll) + y * Math.cos(badge.roll),
+        z: Math.sin(phase) * Math.sin(badge.tilt)
+      };
     }
-    function icon(kind,ix,iy,s){
-      ctx.strokeStyle=LIME;ctx.lineWidth=1.4*s;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
-      if(kind==='code'){
-        ctx.moveTo(ix+5*s,iy-5*s);ctx.lineTo(ix,iy);ctx.lineTo(ix+5*s,iy+5*s);
-        ctx.moveTo(ix+11*s,iy-5*s);ctx.lineTo(ix+16*s,iy);ctx.lineTo(ix+11*s,iy+5*s);
-        ctx.moveTo(ix+9.5*s,iy-6*s);ctx.lineTo(ix+6.5*s,iy+6*s);
-      }else if(kind==='cloud'){
-        ctx.moveTo(ix+4*s,iy+5*s);ctx.arc(ix+4*s,iy+1.5*s,3.5*s,Math.PI/2,Math.PI*1.5);
-        ctx.arc(ix+8*s,iy-1.5*s,4.5*s,Math.PI*1.1,Math.PI*1.95);
-        ctx.arc(ix+12*s,iy+1.5*s,3.5*s,Math.PI*1.5,Math.PI/2);ctx.closePath();
-      }else{
-        ctx.rect(ix+5.75*s,iy-7*s,4.5*s,4.5*s);ctx.rect(ix,iy+3*s,4.5*s,4.5*s);ctx.rect(ix+11.5*s,iy+3*s,4.5*s,4.5*s);
-        ctx.moveTo(ix+8*s,iy-2.5*s);ctx.lineTo(ix+8*s,iy);
-        ctx.moveTo(ix+2.25*s,iy+3*s);ctx.lineTo(ix+2.25*s,iy);ctx.lineTo(ix+13.75*s,iy);ctx.lineTo(ix+13.75*s,iy+3*s);
-      }
-      ctx.stroke();
-    }
-    // Measure the same depth-scaled bounds used when painting each badge.
-    function badgeSize(o, z) {
-      const scale = badgeUnit * (1 + 0.12 * z);
-      ctx.font = `700 ${12 * scale}px "Courier New",monospace`;
-      const width = 37 * scale + ctx.measureText(o.label).width, height = 30 * scale;
-      // Reserve the frontmost size so depth changes cannot squeeze adjacent labels.
-      const maximum = maxBadgeSizes.get(o.label);
-      return { scale, width, height, layoutWidth: maximum.width, layoutHeight: maximum.height };
-    }
-    function intersects(a, b) {
-      return a.x < b.x + b.width && a.x + a.width > b.x &&
-        a.y < b.y + b.height && a.y + a.height > b.y;
-    }
-    // Move through free space around other label slots.
-    function routeStep(start, goal, obstacles, width, height, distance) {
-      const halfW = width / 2 + 1, halfH = height / 2 + 1;
-      const bounds = { left: halfW + 1, top: halfH + 1, right: W - halfW - 1, bottom: H - halfH - 1 };
-      const blocked = obstacles.map(box => {
-        const pad = 1;
-        return { left: box.x - halfW - pad, right: box.x + box.width + halfW + pad,
-          top: box.y - halfH - pad, bottom: box.y + box.height + halfH + pad };
-      });
-      const inside = p => p.x < bounds.left || p.x > bounds.right || p.y < bounds.top || p.y > bounds.bottom ||
-        blocked.some(b => p.x > b.left && p.x < b.right && p.y > b.top && p.y < b.bottom);
-      function clear(a, b) {
-        return blocked.every(box => {
-          let lo = 0, hi = 1;
-          for (const [origin, delta, min, max] of [[a.x, b.x - a.x, box.left + 0.001, box.right - 0.001],
-            [a.y, b.y - a.y, box.top + 0.001, box.bottom - 0.001]]) {
-            if (Math.abs(delta) < 0.00001) { if (origin <= min || origin >= max) return true; continue; }
-            const t1 = (min - origin) / delta, t2 = (max - origin) / delta;
-            lo = Math.max(lo, Math.min(t1, t2)); hi = Math.min(hi, Math.max(t1, t2));
-            if (lo >= hi) return true;
+    function drawSatellites() {
+      const points = badges.map(badge => ({...satellite(badge, badge.phase + orbitTime * badge.speed), badge}));
+      // Start separating in a soft outer margin, before the actual boxes meet.
+      // With three small labels, vertical separation keeps their paths legible
+      // without swapping labels, spinning text or allocating another frame loop.
+      for (let pass = 0; pass < 6; pass++) {
+        for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+          const a = points[i], b = points[j];
+          const clearanceX = (a.badge.width + b.badge.width) / 2 + 10;
+          const clearanceY = (a.badge.height + b.badge.height) / 2 + 10;
+          const pressure = Math.min(1, Math.max(0, (clearanceX + 18 - Math.abs(a.x - b.x)) / 18));
+          const overlap = clearanceY * pressure - Math.abs(a.y - b.y);
+          if (overlap > 0) {
+            const direction = a.y === b.y ? (i < j ? -1 : 1) : Math.sign(a.y - b.y);
+            a.y += direction * overlap / 2; b.y -= direction * overlap / 2;
           }
-          return false;
+        }
+        points.forEach(({badge, ...point}, index) => {
+          points[index].x = Math.min(width - badge.width / 2 - 8, Math.max(badge.width / 2 + 8, point.x));
+          points[index].y = Math.min(height - badge.height / 2 - 8, Math.max(badge.height / 2 + 8, point.y));
         });
       }
-      if (inside(start) || inside(goal)) return null;
-      if (clear(start, goal)) {
-        const length = Math.hypot(goal.x - start.x, goal.y - start.y), part = length ? Math.min(1, distance / length) : 0;
-        return { x: start.x + (goal.x - start.x) * part, y: start.y + (goal.y - start.y) * part };
-      }
-      const points = [start, goal];
-      for (const b of blocked) for (const x of [b.left - 0.1, b.right + 0.1]) for (const y of [b.top - 0.1, b.bottom + 0.1]) {
-        const point = { x, y };
-        if (!inside(point)) points.push(point);
-      }
-      const costs = points.map(() => Infinity), previous = points.map(() => -1), visited = points.map(() => false);
-      costs[0] = 0;
-      for (let i = 0; i < points.length; i++) {
-        let current = -1;
-        for (let j = 0; j < points.length; j++) if (!visited[j] && (current < 0 || costs[j] < costs[current])) current = j;
-        if (current < 0 || !Number.isFinite(costs[current]) || current === 1) break;
-        visited[current] = true;
-        for (let j = 1; j < points.length; j++) {
-          if (visited[j] || !clear(points[current], points[j])) continue;
-          const next = costs[current] + Math.hypot(points[j].x - points[current].x, points[j].y - points[current].y);
-          if (next < costs[j]) { costs[j] = next; previous[j] = current; }
-        }
-      }
-      if (!Number.isFinite(costs[1])) return null;
-      let next = 1;
-      while (previous[next] > 0) next = previous[next];
-      const point = points[next], length = Math.hypot(point.x - start.x, point.y - start.y);
-      const part = length ? Math.min(1, distance / length) : 0;
-      return { x: start.x + (point.x - start.x) * part, y: start.y + (point.y - start.y) * part };
+      points.forEach(({badge, x, y, z}) => {
+        badge.element.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%) scale(${.97 + z * .025})`;
+        badge.element.style.opacity = String(.93 + z * .07);
+        badge.element.style.zIndex = z > 0 ? '3' : '2';
+      });
     }
-    function placeBadges(nodes, time) {
-      const margin = 2, gap = 5;
-      const step = placementTime === null ? Infinity : Math.min(30, Math.max(0, time - placementTime) * 160);
-      function candidates(node, placed, locked) {
-        const width = node.size.layoutWidth, height = node.size.layoutHeight;
-        const originX = node.x - width / 2, originY = node.y - height / 2;
-        const previous = previousCenters.get(node.o.label);
-        const obstacles = [...placed, ...locked];
-        const xs = [originX, margin, W - width - margin];
-        const ys = [originY, margin, H - height - margin];
-        if (previous) { xs.push(previous.x - width / 2); ys.push(previous.y - height / 2); }
-        for (const box of obstacles) {
-          xs.push(box.x - width - gap, box.x + box.width + gap);
-          ys.push(box.y - height - gap, box.y + box.height + gap);
-        }
-        const choices = [], seen = new Set();
-        for (const x of xs) for (const y of ys) {
-          const box = { x, y, width, height };
-          const ink = { x: x - 1, y: y - 1, width: width + 2, height: height + 2 };
-          if (x < margin || y < margin || x + width > W - margin || y + height > H - margin ||
-              obstacles.some(obstacle => intersects(ink,
-                { x: obstacle.x - 1, y: obstacle.y - 1, width: obstacle.width + 2, height: obstacle.height + 2 }))) continue;
-          const key = `${x.toFixed(3)},${y.toFixed(3)}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const dx = x - originX, dy = y - originY;
-          const change = previous ? Math.hypot(x + width / 2 - previous.x, y + height / 2 - previous.y) : 0;
-          choices.push({ ...box, score: Math.hypot(dx, dy) + change * 0.15 });
-        }
-        choices.sort((a, b) => a.score - b.score || a.x - b.x || a.y - b.y);
-        if (!previous) return choices;
-        for (const choice of choices) {
-          const goal = { x: choice.x + width / 2, y: choice.y + height / 2 };
-          const point = routeStep(previous, goal, obstacles, width, height, step);
-          if (point) return [{ x: point.x - width / 2, y: point.y - height / 2, width, height }];
-        }
-        return [];
-      }
-      function search(index, placed) {
-        if (index === nodes.length) return placed;
-        // Reserve other labels' previous locations so they can move without jumping.
-        const locked = nodes.slice(index + 1).flatMap(node => {
-          const old = previousCenters.get(node.o.label);
-          return old ? [{ x: old.x - node.size.layoutWidth / 2, y: old.y - node.size.layoutHeight / 2,
-            width: node.size.layoutWidth, height: node.size.layoutHeight }] : [];
+    const vector = (lat, lon) => [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+    // Decorative great-circle arcs. These are not geography or live telemetry.
+    const routes = [[.4,-1.2,.7,1.4],[-.6,-.5,.5,2.5],[.8,-2.2,-.4,.9],[-.35,1.8,.3,-.6]].map(values => {
+      const a = vector(values[0], values[1]), b = vector(values[2], values[3]);
+      const omega = Math.acos(Math.max(-1, Math.min(1, a.reduce((sum,v,i) => sum + v*b[i],0))));
+      return { a, b, omega };
+    });
+    function routePoint(route, t) {
+      const { a, b, omega } = route;
+      const lift = 1 + Math.sin(t * Math.PI) * .08;
+      return a.map((v,i) => (v*Math.sin((1-t)*omega) + b[i]*Math.sin(t*omega)) / Math.sin(omega) * lift);
+    }
+    function project([x,y,z]) {
+      const yaw = angle + mx, pitch = -.22 + my;
+      const rx = x*Math.cos(yaw) + z*Math.sin(yaw);
+      const rz = z*Math.cos(yaw) - x*Math.sin(yaw);
+      const ry = y*Math.cos(pitch) - rz*Math.sin(pitch);
+      const depth = y*Math.sin(pitch) + rz*Math.cos(pitch);
+      // Orthographic projection keeps the grid calm and the silhouette round.
+      return [width*.5 + rx*radius, height*.49 - ry*radius, depth];
+    }
+    function stroke(points, color, frontAlpha, backAlpha, lineWidth = 1) {
+      ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
+      for (const front of [false,true]) {
+        ctx.globalAlpha = front ? frontAlpha : backAlpha;
+        ctx.beginPath(); let pen = false;
+        points.forEach(point => {
+          const [x,y,z] = project(point);
+          if ((z >= 0) === front) {
+            if (pen) ctx.lineTo(x,y); else ctx.moveTo(x,y);
+            pen = true;
+          } else pen = false;
         });
-        for (const choice of candidates(nodes[index], placed, locked)) {
-          const result = search(index + 1, [...placed, choice]);
-          if (result) return result;
-        }
-        return null;
-      }
-      const placed = search(0, []);
-      placementTime = time;
-      // At impossibly small sizes, keep labels visible even if no collision-free packing exists.
-      if (!placed) return nodes.map(node => {
-        const x = Math.max(margin, Math.min(W - node.size.width - margin, node.x - node.size.width / 2));
-        const y = Math.max(margin, Math.min(H - node.size.height - margin, node.y - node.size.height / 2));
-        return { ...node, box: { x, y, width: node.size.width, height: node.size.height,
-          dx: x - node.x + node.size.width / 2, dy: y - node.y + node.size.height / 2 } };
-      });
-      return nodes.map((node, index) => {
-        const slot = placed[index], x = slot.x + (slot.width - node.size.width) / 2;
-        const y = slot.y + (slot.height - node.size.height) / 2;
-        previousCenters.set(node.o.label, { x: slot.x + slot.width / 2, y: slot.y + slot.height / 2 });
-        return { ...node, box: { x, y, width: node.size.width, height: node.size.height,
-          dx: x - node.x + node.size.width / 2, dy: y - node.y + node.size.height / 2 } };
-      });
-    }
-    function pill(node) {
-      const { o, p, size, box } = node;
-      const s = size.scale, x = box.x, y = box.y, py = y + size.height / 2;
-      ctx.globalAlpha = 0.78 + 0.22 * p[2];
-      ctx.font = `700 ${12 * s}px "Courier New",monospace`;
-      ctx.beginPath(); ctx.roundRect(x, y, size.width, size.height, 7 * s);
-      ctx.fillStyle = colors.surface; ctx.fill(); ctx.strokeStyle = colors.border; ctx.lineWidth = 1.2 * s; ctx.stroke();
-      icon(o.icon, x + 8 * s, py, s);
-      ctx.fillStyle = LIME; ctx.textBaseline = 'middle'; ctx.fillText(o.label, x + 29 * s, py + 0.5 * s);
-      ctx.globalAlpha = 1;
-    }
-
-    function activeTime(now = performance.now()) {
-      return (elapsed + (running ? now - startedAt : 0)) / 1000;
-    }
-    function drawHero(t) {
-      if (!W || !H) return;
-      const cx = W / 2, cy = H / 2;
-      ctx.clearRect(0, 0, W, H);
-      ctx.strokeStyle = LINE;
-      ctx.lineWidth = 1.2;
-      ctx.globalAlpha = 0.55;
-      for (const o of O) {
-        ctx.beginPath();
-        for (let i = 0; i <= 160; i++) {
-          const p = pt(o, i / 160 * Math.PI * 2, t);
-          i ? ctx.lineTo(cx + p[0] * R, cy + p[1] * R) : ctx.moveTo(cx + p[0] * R, cy + p[1] * R);
-        }
         ctx.stroke();
       }
+    }
+    function draw() {
+      ctx.clearRect(0,0,width,height);
       ctx.globalAlpha = 1;
-      // Calculate each physical position from the same approved projection.
-      const nodes = O.map(o => {
-        const p = pt(o, o.p + o.s * t, t);
-        return { o, p, x: cx + p[0] * R, y: cy + p[1] * R, size: badgeSize(o, p[2]) };
-      });
-      // Place the compact ML badge first to preserve stable label priority.
-      nodes.sort((a, b) => ['ML', 'CLOUD', 'CODE'].indexOf(a.o.label) - ['ML', 'CLOUD', 'CODE'].indexOf(b.o.label));
-      const labels = placeBadges(nodes, t);
-      for (const node of labels) {
-        const { x, y, box } = node;
-        const edgeX = Math.max(box.x, Math.min(x, box.x + box.width));
-        const edgeY = Math.max(box.y, Math.min(y, box.y + box.height));
-        if (Math.hypot(box.dx, box.dy) > 0.1 && Math.hypot(edgeX - x, edgeY - y) > 0.1) {
-          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(edgeX, edgeY);
-          ctx.strokeStyle = LINE; ctx.globalAlpha = 0.4; ctx.lineWidth = 0.8; ctx.stroke();
+      const wash = ctx.createRadialGradient(width*.43,height*.4,0,width*.5,height*.49,radius);
+      wash.addColorStop(0,colors.surface); wash.addColorStop(1,colors.bg);
+      ctx.fillStyle = wash; ctx.beginPath(); ctx.arc(width*.5,height*.49,radius,0,tau); ctx.fill();
+      badges.forEach(badge => {
+        ctx.globalAlpha = .34; ctx.strokeStyle = colors.teal; ctx.lineWidth = .8;
+        ctx.beginPath();
+        for (let step = 0; step <= 72; step++) {
+          const point = satellite(badge, step / 72 * tau);
+          if (step) ctx.lineTo(point.x, point.y); else ctx.moveTo(point.x, point.y);
         }
-        // A node remains at the true projected position, beneath its label when aligned.
-        ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2);
-        ctx.fillStyle = LIME; ctx.globalAlpha = 0.8; ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-      labels.sort((a, b) => a.p[2] - b.p[2]).forEach(pill);
-    }
-    function refreshColors() {
-      const style = getComputedStyle(art);
-      const color = name => style.getPropertyValue(name).trim();
-      colors = { surface: color('--elevated-surface'), border: color('--border') };
-      LIME = color('--accent');
-      LINE = color('--muted');
-      drawHero(motion.matches ? 0 : activeTime());
-    }
-    function resizeHero() {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      W = cv.clientWidth;
-      H = cv.clientHeight;
-      M = Math.min(W, H);
-      cv.width = Math.round(W * dpr);
-      cv.height = Math.round(H * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      previousCenters.clear();
-      placementTime = null;
-      // Keep the reference's depth scale, with a legible base size in this smaller slot.
-      badgeUnit = Math.max(M / 500, 1);
-      const maxScale = badgeUnit * 1.12;
-      ctx.font = `700 ${12 * maxScale}px "Courier New",monospace`;
-      const maxWidth = Math.max(...O.map(o => {
-        const textWidth = ctx.measureText(o.label).width;
-        maxBadgeSizes.set(o.label, { width: textWidth + 37 * maxScale, height: 30 * maxScale });
-        // Retain the original orbit radius and its generous edge clearance.
-        return textWidth + 48 * maxScale;
-      }));
-      // Reserve the full frontmost badge, including its stroke, at every orbit extreme.
-      R = Math.max(0, Math.min(M * 0.43, W / 2 - maxWidth / 2 - 3, H / 2 - 17 * maxScale - 3));
-      drawHero(motion.matches ? 0 : activeTime());
-    }
-    function animateHero(now) {
-      frame = null;
-      if (!running) return;
-      drawHero(activeTime(now));
-      frame = requestAnimationFrame(animateHero);
-    }
-    function syncMotion() {
-      const active = visible && !document.hidden && !motion.matches;
-      if (running && !active) {
-        elapsed += performance.now() - startedAt;
-        running = false;
-        cancelAnimationFrame(frame);
-        frame = null;
-      } else if (!running && active) {
-        running = true;
-        startedAt = performance.now();
-        frame = requestAnimationFrame(animateHero);
-      }
-      if (!running) drawHero(motion.matches ? 0 : activeTime());
-    }
-    refreshColors();
-    const resizeObserver = new ResizeObserver(resizeHero);
-    resizeObserver.observe(art);
-    const themeObserver = new MutationObserver(refreshColors);
-    themeObserver.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
-    document.addEventListener('visibilitychange', syncMotion);
-    watch(motion, syncMotion);
-    if ('IntersectionObserver' in window) {
-      const observer = new IntersectionObserver(entries => {
-        visible = entries.some(entry => entry.isIntersecting);
-        syncMotion();
+        ctx.stroke();
       });
-      observer.observe(art);
-    } else visible = true;
-    resizeHero();
-    syncMotion();
+      for (let lat=-3;lat<=3;lat++) stroke(Array.from({length:97},(_,i) => vector(lat*Math.PI/8,i/96*tau)),colors.grid,.82,.34);
+      for (let lon=0;lon<12;lon++) stroke(Array.from({length:65},(_,i) => vector(-Math.PI/2+i/64*Math.PI,lon/12*tau)),colors.grid,.82,.34);
+      ctx.globalAlpha=.6; ctx.strokeStyle=colors.accent; ctx.lineWidth=.9;
+      ctx.beginPath(); ctx.arc(width*.5,height*.49,radius,0,tau); ctx.stroke();
+      routes.forEach((route,index) => {
+        stroke(Array.from({length:65},(_,i) => routePoint(route,i/64)),index%2 ? colors.teal : colors.accent,.88,.28,1.2);
+        // One packet per route, capped at four; static when reduced motion is on.
+        const t = ((angle*.48 + index*.24) % .9) + .05;
+        const [x,y,z] = project(routePoint(route,t));
+        if (z < 0) return;
+        ctx.globalAlpha=.95; ctx.fillStyle=index%2 ? colors.teal : colors.accent;
+        ctx.beginPath(); ctx.arc(x,y,2.3,0,tau); ctx.fill();
+        ctx.globalAlpha=.11; ctx.beginPath(); ctx.arc(x,y,6,0,tau); ctx.fill();
+      });
+      ctx.globalAlpha=1;
+      drawSatellites();
+    }
+    function palette() {
+      const style = getComputedStyle(root);
+      colors = Object.fromEntries(['bg','surface','grid','accent','teal'].map(name => [name,style.getPropertyValue(`--${name}`).trim()]));
+    }
+    function resize() {
+      const box=art.getBoundingClientRect();
+      width=box.width; height=box.height; radius=Math.min(width,height)*.405;
+      const dpr=Math.min(devicePixelRatio || 1,2);
+      cv.width=Math.round(width*dpr); cv.height=Math.round(height*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      badges.forEach(badge => { badge.width = badge.element.offsetWidth; badge.height = badge.element.offsetHeight; });
+      draw();
+    }
+    function tick(now) {
+      const delta=Math.min((now-last)/1000,.05); last=now;
+      angle+=delta*.075;
+      orbitTime+=delta;
+      mx+=(targetX-mx)*.035; my+=(targetY-my)*.035;
+      draw(); frame=requestAnimationFrame(tick);
+    }
+    function sync() {
+      cancelAnimationFrame(frame); frame=0;
+      const running=inView && !document.hidden && !motion.matches;
+      art.dataset.motion=running ? 'running' : 'static';
+      if (running) { last=performance.now(); frame=requestAnimationFrame(tick); }
+      else draw();
+    }
+    function resetPointer() { targetX=targetY=0; }
+    addEventListener('pointermove',event => {
+      if (!effectsAllowed() || !inView || document.hidden || event.pointerType !== 'mouse') return;
+      targetX=(event.clientX/innerWidth-.5)*.16;
+      targetY=(event.clientY/innerHeight-.5)*.10;
+    },{passive:true});
+    document.documentElement.addEventListener('pointerleave',resetPointer);
+    addEventListener('blur',resetPointer);
+    document.addEventListener('visibilitychange',() => { resetPointer(); sync(); });
+    watch(motion,() => { resetPointer(); mx=my=0; sync(); });
+    new MutationObserver(() => { palette(); draw(); }).observe(root,{attributes:true,attributeFilter:['data-theme']});
+    if ('ResizeObserver' in window) new ResizeObserver(resize).observe(art); else addEventListener('resize',resize);
+    if ('IntersectionObserver' in window) new IntersectionObserver(entries => { inView=entries[0].isIntersecting; sync(); }).observe(art);
+    else { inView=true; addEventListener('scroll',() => { const rect=art.getBoundingClientRect(); inView=rect.bottom>0 && rect.top<innerHeight; sync(); },{passive:true}); }
+    palette(); resize(); sync();
   }
+
+  function setupSkillBars() {
+    const cards=[...document.querySelectorAll('.skill-card')];
+    if (motion.matches || !('IntersectionObserver' in window)) return;
+    const observer=new IntersectionObserver(entries => entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.remove('skill-waiting');
+      entry.target.classList.add('skill-entered');
+      observer.unobserve(entry.target);
+    }),{threshold:.18});
+    cards.forEach((card,index) => {
+      card.style.setProperty('--skill-delay',`${index%2*70}ms`);
+      card.classList.add('skill-waiting'); observer.observe(card);
+    });
+    const finish=() => { observer.disconnect(); cards.forEach(card => card.classList.remove('skill-waiting','skill-entered')); };
+    watch(motion,() => { if (motion.matches) finish(); });
+    addEventListener('error',finish,{once:true});
+    addEventListener('unhandledrejection',finish,{once:true});
+  }
+
 
   function setupReveals() {
     if (motion.matches || !('IntersectionObserver' in window)) return;
     // Reveal section introductions separately so tall sections never hide their cards.
-    const elements = [...document.querySelectorAll('.section-heading, .about-copy, .skill-card, .project-card')];
+    const elements = [...document.querySelectorAll('.section-heading, .about-copy, .project-card')];
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.15) return;
@@ -1035,123 +976,282 @@
   function setupPointerEffects() {
     let dispose = null;
     function enable() {
-      if (dispose) { dispose(); dispose = null; }
-      if (!effectsAllowed() || !document.body) return;
-      const events = new AbortController();
-      const listen = (target, type, callback) => target.addEventListener(type, callback, { passive: true, signal: events.signal });
-      const makeLayer = (name) => {
-        const element = document.createElement('div');
-        element.className = name;
-        element.setAttribute('aria-hidden', 'true');
-        document.body.append(element);
-        return element;
+      dispose?.(); dispose = null;
+      if (motion.matches) return;
+      const events = new AbortController(), signal = events.signal;
+      const listen = (target, type, callback) => target.addEventListener(type, callback, {passive: true, signal});
+      // One noninteractive overlay owns the accepted dot and following ring.
+      const layer = document.createElement('div');
+      layer.className = 'pointer-decoration'; layer.setAttribute('aria-hidden', 'true');
+      const dot = document.createElement('span'), ring = document.createElement('span');
+      dot.className = 'pointer-dot'; ring.className = 'pointer-ring';
+      [dot, ring].forEach(element => element.setAttribute('aria-hidden', 'true'));
+      layer.append(ring, dot); document.body.append(layer);
+      const interactive = 'a[href],button:not(:disabled),[role="button"]:not([aria-disabled="true"])';
+      const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-native-cursor]';
+      let frame = 0, x = 0, y = 0, rx = 0, ry = 0, lastFrame = 0;
+      let visible = false, selecting = false, cursorAvailable = true, validate = true;
+      let tap = null, expiry = 0;
+      const touches = new Set(), ripples = new Set();
+      const hasSelection = () => {
+        const selection = window.getSelection?.();
+        return Boolean(selection && !selection.isCollapsed);
       };
-      const glow = makeLayer('site-glow');
-      let frame = 0, x = 0, y = 0;
-      let visible = false;
-      let glowX = null, glowY = null;
-      const cards = [...document.querySelectorAll('.project-card, .skill-card')];
-      const resets = [];
-      const resizes = [];
-      function paint() {
-        frame = 0;
-        if (!visible) return;
-        // Ambient lighting updates once per frame without replacing the cursor.
-        if (x !== glowX || y !== glowY) {
-          glow.style.setProperty('--mx', `${x}px`);
-          glow.style.setProperty('--my', `${y}px`);
-          glowX = x; glowY = y;
-        }
-      }
-      function schedule() { if (!frame) frame = requestAnimationFrame(paint); }
-      function hide() {
+      function hideCursor() {
         visible = false;
-        cancelAnimationFrame(frame); frame = 0;
-        glow.classList.remove('is-active');
-        resets.forEach(reset => reset());
+        cancelAnimationFrame(frame); frame = 0; lastFrame = 0;
+        document.body.classList.remove('custom-cursor-active');
+        layer.classList.remove('is-visible', 'is-interactive');
       }
-      listen(document, 'pointermove', event => {
-        if (event.pointerType !== 'mouse') { hide(); return; }
-        x = event.clientX; y = event.clientY;
-        visible = true;
-        glow.classList.add('is-active');
-        schedule();
-      });
-      listen(document, 'pointerout', event => { if (!event.relatedTarget) hide(); });
-      listen(document.documentElement, 'pointerleave', hide);
-      listen(window, 'pointercancel', hide);
-      listen(window, 'blur', hide);
-      listen(document, 'visibilitychange', () => { if (document.hidden) hide(); });
-
-      // Every card receives a spotlight; project cards retain their smoothed tilt.
-      cards.forEach(card => {
-        const tilts = card.classList.contains('project-card');
-        let box = null, originScroll = 0, cardFrame = 0, inside = false;
-        let angleX = 0, angleY = 0, targetX = 0, targetY = 0, lift = 0, targetLift = 0;
-        let localX = 0, localY = 0;
-        function measure() { box = card.getBoundingClientRect(); originScroll = scrollY; }
-        function paintCard() {
-          cardFrame = 0;
-          angleX += (targetX - angleX) * 0.15;
-          angleY += (targetY - angleY) * 0.15;
-          lift += (targetLift - lift) * 0.15;
-          const settled = Math.abs(targetX - angleX) + Math.abs(targetY - angleY) + Math.abs(targetLift - lift) < 0.01;
-          if (settled) { angleX = targetX; angleY = targetY; lift = targetLift; }
-          card.style.setProperty('--card-x', `${localX}px`);
-          card.style.setProperty('--card-y', `${localY}px`);
-          if (tilts) {
-            card.style.setProperty('--card-lift', `${lift.toFixed(3)}px`);
-            card.style.setProperty('--tilt-x', `${angleX.toFixed(3)}deg`);
-            card.style.setProperty('--tilt-y', `${angleY.toFixed(3)}deg`);
+      function paint(now) {
+        frame = 0;
+        if (!visible || document.hidden) return;
+        try {
+          const delta = lastFrame ? Math.min(now - lastFrame, 40) : 16;
+          lastFrame = now;
+          const follow = 1 - Math.exp(-delta / 65);
+          rx += (x - rx) * follow; ry += (y - ry) * follow;
+          const settling = Math.hypot(x - rx, y - ry) > .12;
+          if (!settling) { rx = x; ry = y; }
+          dot.style.transform = `translate3d(${x}px,${y}px,0)`;
+          ring.style.transform = `translate3d(${rx}px,${ry}px,0)`;
+          layer.classList.add('is-visible');
+          if (validate || !dot.isConnected || !ring.isConnected) {
+            const styles = [dot, ring].map(element => getComputedStyle(element));
+            const layerStyle = getComputedStyle(layer);
+            if (!dot.isConnected || !ring.isConnected || styles.some(style => style.display === 'none' ||
+                style.visibility === 'hidden' || parseFloat(style.width) < 6 || parseFloat(style.opacity) === 0) ||
+                layerStyle.display === 'none' || parseFloat(layerStyle.opacity) === 0) { hideCursor(); return; }
+            validate = false;
           }
-          if (tilts && !settled) cardFrame = requestAnimationFrame(paintCard);
-          else if (!inside) card.classList.remove('tilt-tracking');
+          // Native hiding follows successful positioning/visibility of BOTH parts.
+          document.body.classList.add('custom-cursor-active');
+          // Stop after the following ring settles; no ambient movement loop.
+          if (settling) frame = requestAnimationFrame(paint);
+        } catch (_) { cursorAvailable = false; hideCursor(); }
+      }
+      function cancelTap() { tap = null; clearTimeout(expiry); }
+      function hide() {
+        hideCursor(); selecting = false; cancelTap(); touches.clear();
+        ripples.forEach(item => { clearTimeout(item.timer); item.element.remove(); }); ripples.clear();
+      }
+      function track(event) {
+        if (event.pointerType === 'touch') {
+          hideCursor();
+          if (tap && (event.pointerId !== tap.id || Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > 9)) cancelTap();
+          return;
         }
-        function scheduleCard() { if (!cardFrame) cardFrame = requestAnimationFrame(paintCard); }
-        function move(event) {
-          if (event.pointerType !== 'mouse' || card.matches('.reveal-pending, .reveal-visible')) return;
-          if (!box) measure();
-          inside = true;
-          localX = event.clientX - box.left;
-          localY = event.clientY - box.top + scrollY - originScroll;
-          const horizontal = Math.min(1, Math.max(0, localX / Math.max(1, box.width)));
-          const vertical = Math.min(1, Math.max(0, localY / Math.max(1, box.height)));
-          targetX = (0.5 - vertical) * 5; targetY = (horizontal - 0.5) * 5; targetLift = -4;
-          card.classList.add('spotlight-active');
-          if (tilts) card.classList.add('tilt-tracking');
-          scheduleCard();
+        const target = event.target instanceof Element ? event.target : null;
+        if (event.pointerType !== 'mouse' || !pointer.matches || document.hidden || !cursorAvailable ||
+            !target?.closest('body') || target.closest(editable) || target.isContentEditable ||
+            event.buttons || selecting || hasSelection()) { hideCursor(); return; }
+        x = event.clientX; y = event.clientY;
+        if (!visible) { rx = x; ry = y; }
+        visible = true; validate = true;
+        layer.classList.toggle('is-interactive', Boolean(target.closest(interactive)));
+        if (!frame) frame = requestAnimationFrame(paint);
+      }
+      listen(document, 'pointermove', track);
+      listen(document, 'pointerover', event => { if (!event.relatedTarget) track(event); });
+      listen(document, 'pointerdown', event => {
+        if (event.pointerType === 'mouse') {
+          if (event.button === 0 && !event.target.closest(interactive)) { selecting = true; hideCursor(); }
+          return;
         }
-        function leave() {
-          inside = false; targetX = targetY = targetLift = 0;
-          card.classList.remove('spotlight-active');
-          scheduleCard();
-        }
-        function reset() {
-          cancelAnimationFrame(cardFrame); cardFrame = 0; inside = false; box = null;
-          angleX = angleY = targetX = targetY = lift = targetLift = 0;
-          ['--card-x', '--card-y', '--card-lift', '--tilt-x', '--tilt-y'].forEach(name => card.style.removeProperty(name));
-          card.classList.remove('tilt-tracking', 'spotlight-active');
-        }
-        listen(card, 'pointerenter', event => { if (event.pointerType === 'mouse') { measure(); move(event); } });
-        listen(card, 'pointermove', move);
-        listen(card, 'pointerleave', leave);
-        listen(card, 'pointercancel', leave);
-        resets.push(reset);
-        resizes.push(() => { if (inside) measure(); else box = null; });
+        hideCursor();
+        if (event.pointerType !== 'touch') return;
+        touches.add(event.pointerId);
+        if (touches.size !== 1 || !event.isPrimary) { cancelTap(); return; }
+        tap = {id: event.pointerId, x: event.clientX, y: event.clientY, start: performance.now()};
+        expiry = setTimeout(cancelTap, 260);
       });
-      listen(window, 'resize', () => { resizes.forEach(resize => resize()); if (visible) schedule(); });
-      dispose = () => {
-        events.abort(); hide();
-        glow.remove();
-      };
+      listen(document, 'pointerup', event => {
+        if (event.pointerType === 'mouse') { selecting = false; return; }
+        if (event.pointerType !== 'touch') return;
+        const valid = tap && event.pointerId === tap.id && touches.size === 1 && performance.now() - tap.start < 260 && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) <= 9;
+        touches.delete(event.pointerId); cancelTap();
+        if (!valid) return;
+        // At most one short tap ripple. Compatibility mouse events are unused.
+        ripples.forEach(item => { clearTimeout(item.timer); item.element.remove(); }); ripples.clear();
+        const element = document.createElement('span'); element.className = 'tap-ripple'; element.setAttribute('aria-hidden', 'true');
+        element.style.left = `${event.clientX}px`; element.style.top = `${event.clientY}px`;
+        document.body.append(element);
+        const item = {element, timer: setTimeout(() => { element.remove(); ripples.delete(item); }, 390)};
+        ripples.add(item);
+      });
+      listen(document, 'selectionchange', () => { if (hasSelection()) hideCursor(); });
+      listen(document, 'keydown', event => { if (event.key === 'Tab') hideCursor(); });
+      listen(document, 'pointercancel', hide);
+      listen(document, 'pointerout', event => { if (!event.relatedTarget && event.pointerType === 'mouse') hide(); });
+      listen(document.documentElement, 'pointerleave', event => { if (event.pointerType === 'mouse') hide(); });
+      listen(window, 'blur', hide);
+      listen(window, 'scroll', cancelTap);
+      listen(document, 'visibilitychange', () => { if (document.hidden) hide(); });
+      listen(window, 'pagehide', hide);
+      dispose = () => { events.abort(); hide(); layer.remove(); };
     }
-    watch(pointer, enable);
-    watch(motion, enable);
-    enable();
+    watch(pointer, enable); watch(motion, enable); enable();
+  }
+
+  // Water heading effect
+  function setupWaterHeadings() {
+    if (root.dataset.waterHeadingsReady || !window.CSS?.supports('filter', 'url("#water-probe")') ||
+        !('SVGFETurbulenceElement' in window) || !('SVGFEDisplacementMapElement' in window)) return;
+    const selector = 'h1, h2, h3, h4, h5, h6';
+    const ns = 'http://www.w3.org/2000/svg';
+    const make = (tag, attrs = {}) => {
+      const node = document.createElementNS(ns, tag);
+      Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+      return node;
+    };
+    const svg = make('svg', {class: 'water-heading-defs', width: '0', height: '0', 'aria-hidden': 'true', focusable: 'false'});
+    const defs = make('defs'); svg.append(defs); document.body.append(svg);
+    const prefix = `heading-water-${window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+    const records = new Map(), active = new Set();
+    let counter = 0, frame = 0, last = 0, hovered = null;
+    const selectionActive = () => Boolean(window.getSelection?.()?.toString());
+    function saveStyle(element, name) {
+      return {value: element.style.getPropertyValue(name), priority: element.style.getPropertyPriority(name)};
+    }
+    function restoreStyle(element, name, saved, owned) {
+      if (!saved || element.style.getPropertyValue(name) !== owned) return;
+      if (saved.value) element.style.setProperty(name, saved.value, saved.priority);
+      else element.style.removeProperty(name);
+    }
+    function clearRipple(record) {
+      record.ripple?.remove(); record.ripple = null;
+    }
+    function reset(record) {
+      record.target = record.scale = 0;
+      record.displacement.setAttribute('scale', '0');
+      clearRipple(record);
+      if (record.applied) {
+        restoreStyle(record.element, 'filter', record.filterStyle, record.ownedFilter);
+        restoreStyle(record.element, 'position', record.positionStyle, 'relative');
+        restoreStyle(record.element, 'isolation', record.isolationStyle, 'isolate');
+        if (record.addedClass) record.element.classList.remove('water-heading-active');
+        record.applied = false;
+      }
+      active.delete(record);
+      if (hovered === record) hovered = null;
+    }
+    function clearAll() {
+      cancelAnimationFrame(frame); frame = 0; last = 0;
+      [...active].forEach(reset); hovered = null;
+    }
+    function dispose(record) {
+      reset(record); record.events.abort(); record.filter.remove(); records.delete(record.element);
+    }
+    function schedule() {
+      if (!frame && active.size && !document.hidden && !motion.matches && pointer.matches) {
+        last = last || performance.now(); frame = requestAnimationFrame(animate);
+      }
+    }
+    function animate(now) {
+      frame = 0;
+      if (document.hidden || motion.matches || !pointer.matches) { clearAll(); return; }
+      const delta = Math.min(now - last, 50); last = now;
+      const mix = 1 - Math.pow(1 - .12, delta / (1000 / 60));
+      for (const record of [...active]) {
+        if (!record.element.isConnected) { dispose(record); continue; }
+        try {
+          record.scale += (record.target - record.scale) * mix;
+          if (!record.target && record.scale < .04) { reset(record); continue; }
+          record.displacement.setAttribute('scale', record.scale.toFixed(3));
+          const t = (now - record.started) / 1000;
+          record.noise.setAttribute('baseFrequency', `${(.012 + Math.sin(t * .75) * .0018).toFixed(5)} ${(.021 + Math.cos(t * .62) * .002).toFixed(5)}`);
+          if (record.ripple && now >= record.rippleEnds) clearRipple(record);
+        } catch (_) { record.failed = true; reset(record); }
+      }
+      if (active.size) schedule(); else last = 0;
+    }
+    function targetScale(element) {
+      const size = parseFloat(getComputedStyle(element).fontSize) || 16;
+      const level = Number(element.tagName[1]);
+      if (level <= 2) return size >= 34 ? Math.min(22, Math.max(18, size * .4)) : Math.min(16, size * .45);
+      if (level === 3) return Math.min(15, Math.max(10, size * .5));
+      return Math.min(12, Math.max(8, size * .5));
+    }
+    function enter(record, event) {
+      if (event.pointerType !== 'mouse' || event.buttons || !effectsAllowed() || document.hidden ||
+          record.failed || selectionActive() || record.element.isContentEditable) return;
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      if (hit?.closest(selector) !== record.element) return;
+      if (hovered && hovered !== record) { hovered.target = 0; }
+      const element = record.element, style = getComputedStyle(element);
+      // Non-replaced inline boxes cannot reliably render CSS SVG filters. Keep
+      // their original display and ordinary text instead of changing layout.
+      if (style.display === 'inline' || style.display === 'contents' || style.display === 'none') return;
+      try {
+        const box = element.getBoundingClientRect();
+        // Pixel bounds include displaced glyphs, accents and existing outlines.
+        record.filter.setAttribute('width', Math.ceil(box.width + 64));
+        record.filter.setAttribute('height', Math.ceil(box.height + 64));
+        if (!record.applied) {
+          record.filterStyle = saveStyle(element, 'filter');
+          record.positionStyle = style.position === 'static' ? saveStyle(element, 'position') : null;
+          record.isolationStyle = style.isolation === 'auto' ? saveStyle(element, 'isolation') : null;
+          record.ownedFilter = `${style.filter === 'none' ? '' : `${style.filter} `}url("#${record.filter.id}")`;
+          element.style.setProperty('filter', record.ownedFilter, 'important');
+          // Read back the serialized inline value for exact ownership checks.
+          record.ownedFilter = element.style.getPropertyValue('filter');
+          if (record.positionStyle) element.style.setProperty('position', 'relative');
+          if (record.isolationStyle) element.style.setProperty('isolation', 'isolate');
+          record.addedClass = !element.classList.contains('water-heading-active');
+          element.classList.add('water-heading-active');
+          record.applied = true;
+        }
+        clearRipple(record);
+        const overlay = document.createElement('span'), ripple = document.createElement('span');
+        overlay.className = 'heading-water-bounds'; ripple.className = 'heading-water-ripple';
+        overlay.setAttribute('aria-hidden', 'true'); ripple.setAttribute('aria-hidden', 'true');
+        const diameter = Math.min(1000, Math.max(100, Math.hypot(box.width, box.height) * 1.8));
+        ripple.style.setProperty('--heading-ripple-size', `${diameter}px`);
+        ripple.style.left = `${event.clientX - box.left}px`;
+        ripple.style.top = `${event.clientY - box.top}px`;
+        overlay.append(ripple); element.append(overlay); record.ripple = overlay;
+        record.rippleEnds = performance.now() + 900;
+        record.started = performance.now(); record.target = targetScale(element);
+        hovered = record; active.add(record); schedule();
+      } catch (_) { record.failed = true; reset(record); }
+    }
+    function initialize(element) {
+      if (records.has(element)) return;
+      const filter = make('filter', {id: `${prefix}-${++counter}`, filterUnits: 'userSpaceOnUse', x: '-32', y: '-32', width: '100', height: '100', 'color-interpolation-filters': 'sRGB'});
+      const noise = make('feTurbulence', {type: 'fractalNoise', baseFrequency: '.012 .021', numOctaves: '2', seed: String(counter), stitchTiles: 'stitch', result: 'headingNoise'});
+      const displacement = make('feDisplacementMap', {in: 'SourceGraphic', in2: 'headingNoise', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G'});
+      filter.append(noise, displacement); defs.append(filter);
+      const record = {element, filter, noise, displacement, scale: 0, target: 0, applied: false, ripple: null, events: new AbortController()};
+      records.set(element, record);
+      element.addEventListener('pointerenter', event => enter(record, event), {passive: true, signal: record.events.signal});
+      element.addEventListener('pointerleave', () => { record.target = 0; if (hovered === record) hovered = null; schedule(); }, {passive: true, signal: record.events.signal});
+    }
+    document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(initialize);
+    new MutationObserver(changes => {
+      let removed = false;
+      for (const change of changes) {
+        removed ||= change.removedNodes.length > 0;
+        for (const node of change.addedNodes) if (node instanceof Element) {
+          if (node.matches(selector)) initialize(node);
+          node.querySelectorAll(selector).forEach(initialize);
+        }
+      }
+      if (removed) for (const record of [...records.values()]) if (!record.element.isConnected) dispose(record);
+      if (!active.size) { cancelAnimationFrame(frame); frame = 0; last = 0; }
+    }).observe(document.body, {childList: true, subtree: true});
+    document.addEventListener('pointerdown', clearAll, {passive: true});
+    document.addEventListener('selectionchange', () => { if (selectionActive()) clearAll(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Tab') clearAll(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) clearAll(); });
+    addEventListener('blur', clearAll); addEventListener('pagehide', clearAll);
+    addEventListener('resize', clearAll);
+    watch(motion, () => { if (motion.matches) clearAll(); });
+    watch(pointer, () => { if (!pointer.matches) clearAll(); });
+    root.dataset.waterHeadingsReady = 'true';
   }
 
   // Fail independently: a broken optional enhancement cannot disable navigation.
-  [setupTheme, setupMenu, setupBuilderLab, setupScroll, setupHero, setupPointerEffects, setupReveals].forEach(setup => {
+  [setupTheme, setupMenu, setupBuilderLab, setupScroll, setupHero, setupPointerEffects, setupWaterHeadings, setupSkillBars, setupReveals].forEach(setup => {
     try { setup(); } catch (error) { console.warn(`Portfolio: ${setup.name} unavailable`, error); }
   });
 })();
